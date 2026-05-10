@@ -193,6 +193,7 @@ CREATE TABLE transactions (
   total_margin DECIMAL(18,2) NOT NULL DEFAULT 0,
   total_profit DECIMAL(18,2) NOT NULL DEFAULT 0,
   notes TEXT,
+  sale_date DATE DEFAULT NULL COMMENT 'Tanggal transaksi (kasir); fallback created_at',
   paid_amount DECIMAL(18,2) DEFAULT 0,
   change_amount DECIMAL(18,2) DEFAULT 0,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

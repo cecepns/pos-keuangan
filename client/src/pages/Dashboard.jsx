@@ -186,7 +186,7 @@ export default function Dashboard() {
         </div>
 
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Best seller (qty)</h3>
+          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Best seller — bulan ini (qty)</h3>
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>

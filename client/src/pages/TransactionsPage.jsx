@@ -2,11 +2,25 @@ import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatDateTimeID, formatIDR } from "../utils/format";
+import { formatDateID, formatDateTimeID, formatIDR } from "../utils/format";
+import { buildThermalReceiptHtml } from "../utils/receipt";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { Modal } from "../components/Modal";
+
+const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Hutang" };
+
+function receiptDateStr(tx) {
+  if (!tx) return "";
+  if (tx.sale_date) {
+    const t = new Date(tx.created_at);
+    const time = t.toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
+    return `${formatDateID(tx.sale_date)} · ${time}`;
+  }
+  return formatDateTimeID(tx.created_at);
+}
 
 export default function TransactionsPage() {
   const [list, setList] = useState([]);
@@ -16,6 +30,9 @@ export default function TransactionsPage() {
   const dq = useDebouncedValue(q, 350);
   const [loading, setLoading] = useState(true);
   const [refundId, setRefundId] = useState(null);
+  const [detailId, setDetailId] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -31,6 +48,79 @@ export default function TransactionsPage() {
   useEffect(() => {
     load();
   }, [dq, page]);
+
+  useEffect(() => {
+    if (!detailId) {
+      setDetail(null);
+      return;
+    }
+    let cancelled = false;
+    setDetailLoading(true);
+    api
+      .get(`/api/transactions/${detailId}`)
+      .then(({ data }) => {
+        if (!cancelled) setDetail(data);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          toast.error("Gagal memuat detail");
+          setDetailId(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detailId]);
+
+  async function printReceipt() {
+    if (!detail) return;
+    const t = toast.loading("Menyiapkan struk...");
+    try {
+      const { data: s } = await api.get("/api/settings");
+      const widthMm = Math.min(110, Math.max(58, Number(s.thermal_width_mm) || 80));
+      const lines = (detail.items || []).map((it) => ({
+        name: it.product_name,
+        sell_price: it.sell_price,
+        qty: it.qty,
+        discount_amount: it.discount_amount,
+      }));
+      const payments = (detail.payments || []).map((p) => ({
+        method: PAY_LABEL[p.method] || p.method,
+        amount: p.amount,
+      }));
+      const html = buildThermalReceiptHtml({
+        storeName: s.store_name || "Toko",
+        storeAddress: s.store_address || "",
+        storePhone: s.store_phone || "",
+        footer: s.receipt_footer || "",
+        widthMm,
+        invoiceNo: detail.invoice_no,
+        dateStr: receiptDateStr(detail),
+        lines,
+        subtotal: Number(detail.subtotal),
+        discountTotal: Number(detail.discount_total),
+        taxPercent: Number(detail.tax_percent),
+        taxAmount: Number(detail.tax_amount),
+        grandTotal: Number(detail.grand_total),
+        paidSum: Number(detail.paid_amount),
+        changeAmount: Number(detail.change_amount),
+        payments,
+      });
+      const w = window.open("", "_blank");
+      if (!w) {
+        toast.error("Popup diblokir — izinkan untuk cetak", { id: t });
+        return;
+      }
+      w.document.write(html);
+      w.document.close();
+      toast.success("Struk dibuka di tab baru", { id: t });
+    } catch {
+      toast.dismiss(t);
+    }
+  }
 
   async function doRefund() {
     const t = toast.loading("Refund...");
@@ -50,7 +140,7 @@ export default function TransactionsPage() {
     <PageStack>
       <div>
         <h1 className="text-2xl font-bold">Transaksi</h1>
-        <p className="text-sm text-slate-500">Riwayat & refund</p>
+        <p className="text-sm text-slate-500">Riwayat, detail &amp; refund</p>
       </div>
 
       <input
@@ -66,7 +156,7 @@ export default function TransactionsPage() {
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={5} />
+            <TableSkeleton rows={6} cols={6} />
           </div>
         ) : (
           <table className={PAGE_TABLE_WIDE}>
@@ -89,11 +179,16 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
                   <td className="px-4 py-3 capitalize">{x.status}</td>
                   <td className="px-4 py-3 text-right">
-                    {x.status === "completed" && (
-                      <button type="button" className="text-xs font-semibold text-red-600 hover:underline" onClick={() => setRefundId(x.id)}>
-                        Refund
+                    <div className="flex justify-end gap-2">
+                      <button type="button" className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => setDetailId(x.id)}>
+                        Detail
                       </button>
-                    )}
+                      {x.status === "completed" && (
+                        <button type="button" className="text-xs font-semibold text-red-600 hover:underline" onClick={() => setRefundId(x.id)}>
+                          Refund
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -115,6 +210,113 @@ export default function TransactionsPage() {
           </button>
         </div>
       </div>
+
+      <Modal open={!!detailId} title={detail ? `Transaksi ${detail.invoice_no}` : "Detail transaksi"} onClose={() => setDetailId(null)} wide>
+        {detailLoading && <p className="text-sm text-slate-500">Memuat…</p>}
+        {!detailLoading && detail && (
+          <div className="space-y-4">
+            <div className="grid gap-2 text-sm md:grid-cols-2">
+              <p>
+                <span className="text-slate-500">Waktu sistem</span>
+                <br />
+                <span className="font-medium">{formatDateTimeID(detail.created_at)}</span>
+              </p>
+              {detail.sale_date && (
+                <p>
+                  <span className="text-slate-500">Tanggal penjualan</span>
+                  <br />
+                  <span className="font-medium">{formatDateID(detail.sale_date)}</span>
+                </p>
+              )}
+              <p>
+                <span className="text-slate-500">Kasir</span>
+                <br />
+                <span className="font-medium">{detail.cashier_name || "—"}</span>
+              </p>
+              <p>
+                <span className="text-slate-500">Pelanggan</span>
+                <br />
+                <span className="font-medium">{detail.customer_name || "—"}</span>
+              </p>
+            </div>
+            <div className={PAGE_TABLE_WRAP}>
+              <table className={PAGE_TABLE_WIDE}>
+                <thead className="bg-slate-50 dark:bg-slate-800/80">
+                  <tr>
+                    <th className="px-3 py-2 text-left text-xs">Produk</th>
+                    <th className="px-3 py-2 text-right text-xs">Harga</th>
+                    <th className="px-3 py-2 text-right text-xs">Qty</th>
+                    <th className="px-3 py-2 text-right text-xs">Diskon</th>
+                    <th className="px-3 py-2 text-right text-xs">Jumlah</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                  {(detail.items || []).map((it) => (
+                    <tr key={it.id}>
+                      <td className="px-3 py-2 text-sm">{it.product_name}</td>
+                      <td className="px-3 py-2 text-right text-sm">{formatIDR(it.sell_price)}</td>
+                      <td className="px-3 py-2 text-right text-sm">{it.qty}</td>
+                      <td className="px-3 py-2 text-right text-sm">{formatIDR(it.discount_amount)}</td>
+                      <td className="px-3 py-2 text-right text-sm font-medium">{formatIDR(it.line_total)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-3 text-sm dark:border-slate-800">
+              <div className="space-y-1">
+                <div className="flex justify-between gap-8">
+                  <span className="text-slate-500">Subtotal</span>
+                  <span>{formatIDR(detail.subtotal)}</span>
+                </div>
+                {Number(detail.discount_total) > 0 && (
+                  <div className="flex justify-between gap-8">
+                    <span className="text-slate-500">Diskon</span>
+                    <span>-{formatIDR(detail.discount_total)}</span>
+                  </div>
+                )}
+                {Number(detail.tax_percent) > 0 && (
+                  <div className="flex justify-between gap-8">
+                    <span className="text-slate-500">Pajak {detail.tax_percent}%</span>
+                    <span>{formatIDR(detail.tax_amount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between gap-8 text-base font-bold">
+                  <span>Total</span>
+                  <span>{formatIDR(detail.grand_total)}</span>
+                </div>
+              </div>
+              <div className="space-y-1 text-right">
+                <p className="text-xs font-semibold uppercase text-slate-500">Pembayaran</p>
+                {(detail.payments || []).map((p) => (
+                  <div key={p.id} className="flex justify-end gap-4">
+                    <span>{PAY_LABEL[p.method] || p.method}</span>
+                    <span>{formatIDR(p.amount)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-end gap-4 pt-1 font-medium">
+                  <span>Dibayar</span>
+                  <span>{formatIDR(detail.paid_amount)}</span>
+                </div>
+                {Number(detail.change_amount) > 0 && (
+                  <div className="flex justify-end gap-4 text-emerald-600">
+                    <span>Kembalian</span>
+                    <span>{formatIDR(detail.change_amount)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setDetailId(null)}>
+                Tutup
+              </button>
+              <button type="button" className="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white" onClick={printReceipt}>
+                Cetak struk
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       <ConfirmDialog
         open={!!refundId}

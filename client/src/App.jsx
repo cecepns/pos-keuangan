@@ -15,7 +15,6 @@ const CustomersPage = lazy(() => import("./pages/CustomersPage.jsx"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage.jsx"));
 const TransactionsPage = lazy(() => import("./pages/TransactionsPage.jsx"));
 const CashFlowPage = lazy(() => import("./pages/CashFlowPage.jsx"));
-const DebtsPage = lazy(() => import("./pages/DebtsPage.jsx"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage.jsx"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.jsx"));
@@ -64,7 +63,6 @@ export default function App() {
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="transactions" element={<TransactionsPage />} />
             <Route path="cash-flow" element={<CashFlowPage />} />
-            <Route path="debts" element={<DebtsPage />} />
             <Route path="reports" element={<ReportsPage />} />
             <Route path="employees" element={<EmployeesPage />} />
             <Route path="settings" element={<SettingsPage />} />

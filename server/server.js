@@ -297,7 +297,9 @@ app.get(
          FROM transaction_items ti
          JOIN products p ON p.id = ti.product_id
          JOIN transactions t ON t.id = ti.transaction_id
-         WHERE t.status='completed' AND DATE(t.created_at) >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+         WHERE t.status='completed'
+           AND YEAR(COALESCE(t.sale_date, t.created_at)) = YEAR(CURDATE())
+           AND MONTH(COALESCE(t.sale_date, t.created_at)) = MONTH(CURDATE())
          GROUP BY p.id ORDER BY qty DESC LIMIT 8`
       );
       bestSeller = bs;
@@ -393,6 +395,26 @@ app.delete(
   asyncHandler(async (req, res) => {
     await pool.query(`DELETE FROM categories WHERE id=?`, [req.params.id]);
     res.json({ ok: true });
+  })
+);
+
+app.get(
+  "/api/income-categories",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (_req, res) => {
+    const [rows] = await pool.query(`SELECT id, name FROM income_categories ORDER BY name`);
+    res.json({ data: rows });
+  })
+);
+
+app.get(
+  "/api/expense-categories",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (_req, res) => {
+    const [rows] = await pool.query(`SELECT id, name, type FROM expense_categories ORDER BY name`);
+    res.json({ data: rows });
   })
 );
 
@@ -718,8 +740,14 @@ async function createPosTransaction(body, userId, conn) {
     status = "completed",
     payments = [],
     items = [],
+    sale_date: rawSaleDate,
   } = body;
   if (!Array.isArray(items) || !items.length) throw new Error("Item kosong");
+
+  const sale_date =
+    rawSaleDate && /^\d{4}-\d{2}-\d{2}$/.test(String(rawSaleDate))
+      ? String(rawSaleDate).slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
 
   let subtotal = 0;
   let totalCost = 0;
@@ -770,8 +798,8 @@ async function createPosTransaction(body, userId, conn) {
 
   const [txr] = await conn.query(
     `INSERT INTO transactions (invoice_no, user_id, customer_id, status, subtotal, discount_total, tax_percent, tax_amount,
-      grand_total, total_cost, total_margin, total_profit, notes, paid_amount, change_amount)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      grand_total, total_cost, total_margin, total_profit, notes, sale_date, paid_amount, change_amount)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       invoice_no,
       userId,
@@ -786,6 +814,7 @@ async function createPosTransaction(body, userId, conn) {
       totalMargin,
       totalProfit,
       notes || null,
+      sale_date,
       0,
       0,
     ]
@@ -814,55 +843,69 @@ async function createPosTransaction(body, userId, conn) {
   }
 
   let paidSum = 0;
+  let changeAmount = 0;
   if (status === "completed" && payments.length) {
-    for (const pay of payments) {
-      const amt = Number(pay.amount || 0);
-      paidSum += amt;
+    let remaining = grandTotal;
+    const METHOD_ORDER = { cash: 1, transfer: 2, qris: 3, hutang: 4 };
+    const ordered = [...payments]
+      .filter((p) => Number(p.amount || 0) > 0)
+      .sort((a, b) => (METHOD_ORDER[a.method] || 99) - (METHOD_ORDER[b.method] || 99));
+
+    for (const pay of ordered) {
+      const tendered = Number(pay.amount || 0);
+      paidSum += tendered;
+      const slice = Math.min(tendered, Math.max(remaining, 0));
+      remaining -= slice;
+
       await conn.query(
         `INSERT INTO transaction_payments (transaction_id, method, amount, cash_account_id) VALUES (?,?,?,?)`,
-        [txId, pay.method, amt, pay.cash_account_id || null]
+        [txId, pay.method, tendered, pay.cash_account_id || null]
       );
-      if (pay.method === "cash" && pay.cash_account_id) {
-        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, pay.cash_account_id]);
+
+      if (pay.method === "cash" && pay.cash_account_id && slice > 0) {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [slice, pay.cash_account_id]);
         await conn.query(
-          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
-           VALUES (?,?,?,?,CURDATE(),?)`,
-          [pay.cash_account_id, "in", amt, `Penjualan ${invoice_no}`, userId]
+          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by, reference)
+           VALUES (?,?,?,?,?,?,?)`,
+          [pay.cash_account_id, "in", slice, `Penjualan ${invoice_no}`, sale_date, userId, `trx:${txId}`]
         );
       }
-      if (pay.method === "transfer" && pay.cash_account_id) {
-        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, pay.cash_account_id]);
+      if (pay.method === "transfer" && pay.cash_account_id && slice > 0) {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [slice, pay.cash_account_id]);
         await conn.query(
-          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
-           VALUES (?,?,?,?,CURDATE(),?)`,
-          [pay.cash_account_id, "in", amt, `Transfer ${invoice_no}`, userId]
+          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by, reference)
+           VALUES (?,?,?,?,?,?,?)`,
+          [pay.cash_account_id, "in", slice, `Transfer ${invoice_no}`, sale_date, userId, `trx:${txId}`]
         );
       }
-      if (pay.method === "qris" && pay.cash_account_id) {
-        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, pay.cash_account_id]);
+      if (pay.method === "qris" && pay.cash_account_id && slice > 0) {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [slice, pay.cash_account_id]);
         await conn.query(
-          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
-           VALUES (?,?,?,?,CURDATE(),?)`,
-          [pay.cash_account_id, "in", amt, `QRIS ${invoice_no}`, userId]
+          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by, reference)
+           VALUES (?,?,?,?,?,?,?)`,
+          [pay.cash_account_id, "in", slice, `QRIS ${invoice_no}`, sale_date, userId, `trx:${txId}`]
         );
       }
       if (pay.method === "hutang") {
         const custId = customer_id;
         if (!custId) throw new Error("Customer wajib untuk pembayaran hutang/piutang");
-        await conn.query(
-          `INSERT INTO receivables (customer_id, transaction_id, amount, paid_amount, balance, status)
-           VALUES (?,?,?,?,?,'open')`,
-          [custId, txId, amt, 0, amt]
-        );
-        await conn.query(`UPDATE customers SET balance_receivable = balance_receivable + ? WHERE id=?`, [amt, custId]);
+        if (slice > 0) {
+          await conn.query(
+            `INSERT INTO receivables (customer_id, transaction_id, amount, paid_amount, balance, status)
+             VALUES (?,?,?,?,?,'open')`,
+            [custId, txId, slice, 0, slice]
+          );
+          await conn.query(`UPDATE customers SET balance_receivable = balance_receivable + ? WHERE id=?`, [slice, custId]);
+        }
       }
     }
-  }
 
-  const changeAmount = Math.max(0, paidSum - grandTotal);
-  const cashPayment = payments.find((p) => p.method === "cash");
-  if (status === "completed" && cashPayment) {
+    if (remaining > 0.015) throw new Error("Total pembayaran kurang dari grand total");
+
+    changeAmount = Math.max(0, paidSum - grandTotal);
     await conn.query(`UPDATE transactions SET paid_amount=?, change_amount=? WHERE id=?`, [paidSum, changeAmount, txId]);
+  } else if (status === "completed" && grandTotal > 0.01) {
+    throw new Error("Pembayaran wajib untuk menyelesaikan transaksi");
   }
 
   if (status === "completed") {
@@ -1054,7 +1097,12 @@ app.get(
       params.push(qq, qq, qq);
     }
     const [rows] = await pool.query(
-      `SELECT SQL_CALC_FOUND_ROWS cf.*, ca.name AS account_name FROM cash_flows cf JOIN cash_accounts ca ON ca.id=cf.cash_account_id
+      `SELECT SQL_CALC_FOUND_ROWS cf.*, ca.name AS account_name,
+         ec.name AS expense_category_name, ic.name AS income_category_name
+       FROM cash_flows cf
+       JOIN cash_accounts ca ON ca.id=cf.cash_account_id
+       LEFT JOIN expense_categories ec ON cf.category_type='expense' AND cf.category_id = ec.id
+       LEFT JOIN income_categories ic ON cf.category_type='income' AND cf.category_id = ic.id
        ${where} ORDER BY cf.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
@@ -1090,14 +1138,24 @@ app.post(
           [b.to_account_id, "transfer_in", amt, b.description || "Transfer masuk", b.flow_date, req.user.id]
         );
       } else {
+        let category_id = null;
+        let category_type = null;
+        if (type === "in" && b.income_category_id) {
+          category_id = Number(b.income_category_id);
+          category_type = "income";
+        }
+        if (type === "out" && b.expense_category_id) {
+          category_id = Number(b.expense_category_id);
+          category_type = "expense";
+        }
         await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [
           type === "in" ? amt : -amt,
           b.cash_account_id,
         ]);
         await conn.query(
-          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
-           VALUES (?,?,?,?,?,?)`,
-          [b.cash_account_id, type, amt, b.description || "", b.flow_date, req.user.id]
+          `INSERT INTO cash_flows (cash_account_id, type, amount, category_id, category_type, description, flow_date, created_by)
+           VALUES (?,?,?,?,?,?,?,?)`,
+          [b.cash_account_id, type, amt, category_id, category_type, b.description || "", b.flow_date, req.user.id]
         );
       }
       await conn.commit();

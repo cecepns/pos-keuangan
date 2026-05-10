@@ -78,6 +78,10 @@ ON DUPLICATE KEY UPDATE product_id=product_id;
 
 INSERT INTO settings (`key`, value) VALUES
 ('store_name', 'Toko Anggrek Sejahtera'),
+('store_address', ''),
+('store_phone', ''),
+('receipt_footer', 'Terima kasih'),
+('thermal_width_mm', '80'),
 ('tax_default', '0'),
 ('currency', 'IDR'),
 ('whatsapp_sender_note', 'Terima kasih atas pembelian Anda!')

@@ -16,6 +16,8 @@ export default function CashFlowPage() {
   const [qInput, setQInput] = useState("");
   const dq = useDebouncedValue(qInput, 350);
   const [accounts, setAccounts] = useState([]);
+  const [incomeCats, setIncomeCats] = useState([]);
+  const [expenseCats, setExpenseCats] = useState([]);
   const [open, setOpen] = useState(false);
   const form = useForm({
     defaultValues: {
@@ -26,6 +28,8 @@ export default function CashFlowPage() {
       flow_date: new Date().toISOString().slice(0, 10),
       from_account_id: "",
       to_account_id: "",
+      income_category_id: "",
+      expense_category_id: "",
     },
   });
 
@@ -52,6 +56,20 @@ export default function CashFlowPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!open) return;
+    (async () => {
+      try {
+        const [inc, exp] = await Promise.all([api.get("/api/income-categories"), api.get("/api/expense-categories")]);
+        setIncomeCats(inc.data?.data || []);
+        setExpenseCats(exp.data?.data || []);
+      } catch {
+        setIncomeCats([]);
+        setExpenseCats([]);
+      }
+    })();
+  }, [open]);
+
   async function onSubmit(v) {
     const t = toast.loading("Menyimpan...");
     try {
@@ -65,13 +83,16 @@ export default function CashFlowPage() {
           flow_date: v.flow_date,
         });
       } else {
-        await api.post("/api/cash-flows", {
+        const body = {
           type: v.mode,
           cash_account_id: Number(v.cash_account_id),
           amount: Number(v.amount),
           description: v.description,
           flow_date: v.flow_date,
-        });
+        };
+        if (v.mode === "in" && v.income_category_id) body.income_category_id = Number(v.income_category_id);
+        if (v.mode === "out" && v.expense_category_id) body.expense_category_id = Number(v.expense_category_id);
+        await api.post("/api/cash-flows", body);
       }
       toast.success("Tercatat", { id: t });
       setOpen(false);
@@ -92,7 +113,24 @@ export default function CashFlowPage() {
           <h1 className="text-2xl font-bold">Cash flow</h1>
           <p className="text-sm text-slate-500">Pemasukan, pengeluaran, transfer kas</p>
         </div>
-        <button type="button" onClick={() => setOpen(true)} className="rounded-2xl bg-brand-600 px-5 py-2.5 font-semibold text-white">
+        <button
+          type="button"
+          onClick={() => {
+            form.reset({
+              mode: "in",
+              cash_account_id: accounts[0]?.id ?? "",
+              amount: 0,
+              description: "",
+              flow_date: new Date().toISOString().slice(0, 10),
+              from_account_id: accounts[0]?.id ?? "",
+              to_account_id: accounts[1]?.id ?? accounts[0]?.id ?? "",
+              income_category_id: "",
+              expense_category_id: "",
+            });
+            setOpen(true);
+          }}
+          className="rounded-2xl bg-brand-600 px-5 py-2.5 font-semibold text-white"
+        >
           Catat transaksi
         </button>
       </div>
@@ -121,6 +159,7 @@ export default function CashFlowPage() {
               <th className="px-4 py-3 text-left">Tanggal</th>
               <th className="px-4 py-3 text-left">Akun</th>
               <th className="px-4 py-3 text-left">Jenis</th>
+              <th className="px-4 py-3 text-left">Kategori</th>
               <th className="px-4 py-3 text-right">Jumlah</th>
               <th className="px-4 py-3 text-left">Keterangan</th>
             </tr>
@@ -131,6 +170,9 @@ export default function CashFlowPage() {
                 <td className="px-4 py-3">{formatDateID(r.flow_date)}</td>
                 <td className="px-4 py-3">{r.account_name}</td>
                 <td className="px-4 py-3 capitalize">{r.type.replace("_", " ")}</td>
+                <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">
+                  {r.income_category_name || r.expense_category_name || "—"}
+                </td>
                 <td className="px-4 py-3 text-right">{formatIDR(r.amount)}</td>
                 <td className="px-4 py-3">{r.description}</td>
               </tr>
@@ -187,16 +229,44 @@ export default function CashFlowPage() {
               </div>
             </>
           ) : (
-            <div className="md:col-span-2">
-              <label className="text-xs text-slate-500">Rekening kas</label>
-              <select className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("cash_account_id")}>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <>
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-500">Rekening kas</label>
+                <select className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("cash_account_id")}>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {form.watch("mode") === "in" && (
+                <div className="md:col-span-2">
+                  <label className="text-xs text-slate-500">Kategori pemasukan (opsional)</label>
+                  <select className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("income_category_id")}>
+                    <option value="">—</option>
+                    {incomeCats.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {form.watch("mode") === "out" && (
+                <div className="md:col-span-2">
+                  <label className="text-xs text-slate-500">Kategori pengeluaran (opsional)</label>
+                  <select className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("expense_category_id")}>
+                    <option value="">—</option>
+                    {expenseCats.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </>
           )}
           <div>
             <label className="text-xs text-slate-500">Jumlah</label>
