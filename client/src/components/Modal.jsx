@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 export function Modal({ open, title, children, onClose, wide }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4 !mt-0">
       <button
         type="button"
         className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
