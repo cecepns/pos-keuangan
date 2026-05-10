@@ -11,6 +11,12 @@ const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
 const PosPage = lazy(() => import("./pages/PosPage.jsx"));
 const ProductsPage = lazy(() => import("./pages/ProductsPage.jsx"));
+const CategoriesPage = lazy(() => import("./pages/CategoriesPage.jsx"));
+const BarcodeLabelsPage = lazy(() => import("./pages/BarcodeLabelsPage.jsx"));
+const StockSummaryPage = lazy(() => import("./pages/StockSummaryPage.jsx"));
+const StockAdjustPage = lazy(() => import("./pages/StockAdjustPage.jsx"));
+const LowStockPage = lazy(() => import("./pages/LowStockPage.jsx"));
+const OperationalExpensePage = lazy(() => import("./pages/OperationalExpensePage.jsx"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage.jsx"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage.jsx"));
 const TransactionsPage = lazy(() => import("./pages/TransactionsPage.jsx"));
@@ -59,6 +65,12 @@ export default function App() {
             <Route path="dashboard" element={<Dashboard />} />
             <Route path="pos" element={<PosPage />} />
             <Route path="products" element={<ProductsPage />} />
+            <Route path="categories" element={<CategoriesPage />} />
+            <Route path="barcode-labels" element={<BarcodeLabelsPage />} />
+            <Route path="stock-summary" element={<StockSummaryPage />} />
+            <Route path="stock-adjust" element={<StockAdjustPage />} />
+            <Route path="low-stock" element={<LowStockPage />} />
+            <Route path="expenses" element={<OperationalExpensePage />} />
             <Route path="customers" element={<CustomersPage />} />
             <Route path="suppliers" element={<SuppliersPage />} />
             <Route path="transactions" element={<TransactionsPage />} />

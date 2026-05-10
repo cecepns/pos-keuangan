@@ -21,6 +21,16 @@ import api from "../api/client";
 import { formatIDR } from "../utils/format";
 import { Skeleton } from "../components/Skeleton";
 import { useAuthStore } from "../store/authStore";
+import moment from "moment";
+import "moment/locale/id";
+
+moment.locale("id");
+
+function formatDashboardChartDate(value) {
+  if (value == null || value === "") return "";
+  const m = moment(value);
+  return m.isValid() ? m.format("D MMM YYYY") : String(value);
+}
 
 function StatCard({ title, value, icon: Icon, accent }) {
   return (
@@ -84,11 +94,11 @@ export default function Dashboard() {
       : 0;
 
   const salesData = (data.charts?.sales || []).map((r) => ({
-    name: r.d,
+    date: r.d,
     omzet: Number(r.total),
   }));
   const profitData = (data.charts?.profit || []).map((r) => ({
-    name: r.d,
+    date: r.d,
     profit: Number(r.total),
   }));
 
@@ -176,9 +186,9 @@ export default function Dashboard() {
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200 dark:stroke-slate-700" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatDashboardChartDate} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v) => formatIDR(v)} />
+                <Tooltip formatter={(v) => formatIDR(v)} labelFormatter={formatDashboardChartDate} />
                 <Area type="monotone" dataKey="omzet" stroke="#0d9488" fillOpacity={1} fill="url(#gOmzet)" />
               </AreaChart>
             </ResponsiveContainer>
@@ -210,9 +220,9 @@ export default function Dashboard() {
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={profitData}>
                 <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={formatDashboardChartDate} />
                 <YAxis tick={{ fontSize: 11 }} />
-                <Tooltip formatter={(v) => formatIDR(v)} />
+                <Tooltip formatter={(v) => formatIDR(v)} labelFormatter={formatDashboardChartDate} />
                 <Legend />
                 <Line type="monotone" dataKey="profit" stroke="#f97316" strokeWidth={2} dot={false} />
               </LineChart>

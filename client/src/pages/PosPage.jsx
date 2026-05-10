@@ -130,14 +130,19 @@ export default function PosPage() {
   }, [custQ]);
 
   function addToCart(p) {
-    const st = Number(p.stock);
-    if (st <= 0) {
-      toast.error("Stok habis — tidak bisa ditambahkan");
+    const avail = availableOnGrid(p);
+    if (avail <= 0) {
+      toast.error("Stok tidak tersedia untuk keranjang");
       return;
     }
+    const st = Number(p.stock);
     const ex = cart.find((c) => c.product_id === p.id);
     if (ex) {
-      if (ex.qty >= st) {
+      const cap = Math.max(
+        0,
+        liveStock(p.id, ex.stock) - ((reservedByProduct[p.id] || 0) - ex.qty)
+      );
+      if (ex.qty + 1 > cap) {
         toast.error("Stok tidak cukup");
         return;
       }
@@ -166,7 +171,10 @@ export default function PosPage() {
         if (c.product_id !== id) return c;
         let next = { ...c, ...patch };
         if (patch.qty != null) {
-          const mq = Math.max(1, Math.min(Number(patch.qty) || 1, Number(c.stock)));
+          const srv = liveStock(c.product_id, c.stock);
+          const otherRes = (reservedByProduct[c.product_id] || 0) - c.qty;
+          const cap = Math.max(1, Math.max(0, srv - otherRes));
+          const mq = Math.max(1, Math.min(Number(patch.qty) || 1, cap));
           next.qty = mq;
         }
         if (patch.discount_amount != null) {
@@ -202,6 +210,25 @@ export default function PosPage() {
       }, 0),
     [cart]
   );
+
+  const reservedByProduct = useMemo(() => {
+    const m = {};
+    for (const c of cart) {
+      m[c.product_id] = (m[c.product_id] || 0) + c.qty;
+    }
+    return m;
+  }, [cart]);
+
+  function liveStock(pid, fallbackStock) {
+    const pr = products.find((x) => x.id === pid);
+    return pr != null ? Number(pr.stock) : Number(fallbackStock);
+  }
+
+  function availableOnGrid(p) {
+    const st = Number(p.stock);
+    const res = reservedByProduct[p.id] || 0;
+    return Math.max(0, st - res);
+  }
 
   const paidSumDraft = cashAmt + transferAmt + qrisAmt + debtAmt;
   const kembalianDraft = Math.max(0, paidSumDraft - grandTotal);
@@ -352,11 +379,13 @@ export default function PosPage() {
     const labels = [];
     for (let i = 0; i < n; i++) {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      JsBarcode(svg, String(code), { format: "CODE128", width: 1.6, height: 48, displayValue: true, fontSize: 11 });
+      JsBarcode(svg, String(code), { format: "CODE128", width: 1.6, height: 48, displayValue: false, fontSize: 11 });
+      const bottom = String(p.barcode || p.sku || code).replace(/</g, "&lt;");
       labels.push(
         `<div class="lb" style="page-break-after:always;text-align:center;padding:8px;font-family:sans-serif;font-size:11px;">
           <div style="font-weight:600;margin-bottom:4px;">${String(p.name).replace(/</g, "&lt;")}</div>
           ${svg.outerHTML}
+          <div style="margin-top:4px;font-family:monospace;font-size:10px;">${bottom}</div>
         </div>`
       );
     }
@@ -374,7 +403,7 @@ export default function PosPage() {
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Point of Sale</h1>
-          <p className="text-sm text-slate-500">Stok realtime · bayar boleh lebih (kembalian)</p>
+          <p className="text-sm text-slate-500">Stok tersisa ikut keranjang · bayar boleh lebih (kembalian)</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -439,20 +468,28 @@ export default function PosPage() {
           </div>
           <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-2xl border border-slate-100 dark:border-slate-800">
             <div className="grid gap-2 p-2 sm:grid-cols-2">
-              {products.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={Number(p.stock) <= 0}
-                  onClick={() => addToCart(p)}
-                  className="flex flex-col rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-soft transition hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-800 dark:bg-slate-900"
-                >
-                  <span className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">{p.name}</span>
-                  <span className="text-xs text-slate-500">{p.sku}</span>
-                  <span className="mt-1 text-brand-700 dark:text-brand-300">{formatIDR(p.sell_price)}</span>
-                  <span className={`text-xs ${Number(p.stock) <= 0 ? "text-red-500" : "text-slate-400"}`}>Stok: {p.stock}</span>
-                </button>
-              ))}
+              {products.map((p) => {
+                const left = availableOnGrid(p);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={left <= 0}
+                    onClick={() => addToCart(p)}
+                    className="flex flex-col rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-soft transition hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    <span className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">{p.name}</span>
+                    <span className="text-xs text-slate-500">{p.sku}</span>
+                    <span className="mt-1 text-brand-700 dark:text-brand-300">{formatIDR(p.sell_price)}</span>
+                    <span className={`text-xs ${left <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                      Tersisa: {left}
+                      {(reservedByProduct[p.id] || 0) > 0 ? (
+                        <span className="text-slate-500"> / gudang {p.stock}</span>
+                      ) : null}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
           {hasMoreProducts && (
@@ -532,7 +569,12 @@ export default function PosPage() {
                   )}
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <label>
-                      Qty (maks {c.stock})
+                      Qty (maks{" "}
+                      {Math.max(
+                        1,
+                        liveStock(c.product_id, c.stock) - ((reservedByProduct[c.product_id] || 0) - c.qty)
+                      )}
+                      )
                       <div className="flex items-center gap-1">
                         <button type="button" className="rounded bg-white p-1 dark:bg-slate-900" onClick={() => updateLine(c.product_id, { qty: Math.max(1, c.qty - 1) })}>
                           <Minus className="h-3 w-3" />

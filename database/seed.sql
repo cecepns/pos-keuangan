@@ -33,12 +33,12 @@ INSERT INTO users (id, role_id, store_id, name, email, password_hash, is_active)
 (3, 3, 1, 'Owner Budi', 'owner@pos.local', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 1)
 ON DUPLICATE KEY UPDATE name=VALUES(name);
 
-INSERT INTO categories (id, name, slug) VALUES
-(1, 'Anggrek', 'anggrek'),
-(2, 'Media Tanam', 'media-tanam'),
-(3, 'Pot & Wadah', 'pot-wadah'),
-(4, 'Pupuk', 'pupuk')
-ON DUPLICATE KEY UPDATE name=VALUES(name);
+INSERT INTO categories (id, name, code, slug) VALUES
+(1, 'Anggrek', '0001', 'anggrek'),
+(2, 'Media Tanam', '0002', 'media-tanam'),
+(3, 'Pot & Wadah', '0003', 'pot-wadah'),
+(4, 'Pupuk', '0004', 'pupuk')
+ON DUPLICATE KEY UPDATE name=VALUES(name), code=VALUES(code);
 
 INSERT INTO suppliers (id, name, contact_name, phone, whatsapp, category, total_purchase, balance_payable) VALUES
 (1, 'CV Bibit Nusantara', 'Pak Joko', '022123456', '628111222333', 'bibit', 15000000, 500000),

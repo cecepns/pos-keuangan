@@ -30,6 +30,8 @@ export default function ReportsPage() {
   const [marginTotal, setMarginTotal] = useState(0);
   const [marginPage, setMarginPage] = useState(1);
 
+  const [pl, setPl] = useState(null);
+
   const loadSales = useCallback(async () => {
     const { data } = await api.get("/api/reports/sales", { params: { from, to, page: salesPage, limit: PAGE_SIZE } });
     setSales(data.data || []);
@@ -75,6 +77,13 @@ export default function ReportsPage() {
   useEffect(() => {
     loadMargin().catch(() => {});
   }, [loadMargin]);
+
+  useEffect(() => {
+    api
+      .get("/api/reports/profit-loss", { params: { from, to } })
+      .then(({ data }) => setPl(data))
+      .catch(() => setPl(null));
+  }, [from, to]);
 
   async function exportPdf() {
     const allSales = await fetchAllPages("/api/reports/sales", { from, to });
@@ -141,6 +150,75 @@ export default function ReportsPage() {
           Print halaman
         </button>
       </div>
+
+      {pl && (
+        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900 print:break-inside-avoid">
+          <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-white">Laporan laba rugi</h2>
+          <p className="mb-4 text-xs text-slate-500">
+            Periode {pl.from === pl.to ? pl.from : `${pl.from} s/d ${pl.to}`} — penjualan dari tanggal transaksi POS; pengeluaran dari tanggal aliran kas.
+          </p>
+          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
+              <p className="text-xs text-slate-500">Pendapatan (grand total)</p>
+              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.revenue)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
+              <p className="text-xs text-slate-500">HPP / modal penjualan</p>
+              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.hpp)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
+              <p className="text-xs text-slate-500">Pajak penjualan</p>
+              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.tax_amount)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
+              <p className="text-xs text-slate-500">Biaya operasional</p>
+              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.operational_expense)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-brand-50/90 px-4 py-3 dark:border-brand-900/40 dark:bg-brand-950/30">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Laba bersih (est.)</p>
+              <p className="mt-1 text-sm font-bold tabular-nums text-brand-800 dark:text-brand-200">{formatIDR(pl.summary.net_profit)}</p>
+            </div>
+          </div>
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-2 font-semibold">Ringkasan</h3>
+              <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
+                <li>Laba kotor (total_profit trx): {formatIDR(pl.summary.gross_profit)}</li>
+                <li>Pendapatan net (setelah pajak): {formatIDR(pl.summary.revenue_after_tax)}</li>
+                {pl.summary.pct_gross != null && (
+                  <li>Laba kotor vs pendapatan net: {(pl.summary.pct_gross).toFixed(1)}%</li>
+                )}
+                {pl.summary.pct_net != null && (
+                  <li>Laba bersih vs pendapatan net: {(pl.summary.pct_net).toFixed(1)}%</li>
+                )}
+              </ul>
+            </div>
+            <div>
+              <h3 className="mb-2 font-semibold">Pengeluaran per kategori</h3>
+              <div className={REPORT_TABLE_SCROLL}>
+                <table className={PAGE_TABLE}>
+                  <thead>
+                    <tr className="border-b">
+                      <th className="py-2 text-left">Tipe</th>
+                      <th className="py-2 text-right">Jumlah</th>
+                      <th className="py-2 text-right">%</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(pl.expense_breakdown || []).map((r, i) => (
+                      <tr key={i} className="border-b border-slate-50 dark:border-slate-800">
+                        <td className="py-2">{r.expense_type}</td>
+                        <td className="py-2 text-right tabular-nums">{formatIDR(r.amount)}</td>
+                        <td className="py-2 text-right tabular-nums">{r.pct.toFixed(0)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid min-w-0 gap-6 lg:grid-cols-2 print:block">
         <div className="min-w-0 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">

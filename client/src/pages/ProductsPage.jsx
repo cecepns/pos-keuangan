@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import toast from "react-hot-toast";
-import { Plus, Pencil, Trash2, ScanBarcode, Tag } from "lucide-react";
+import { Plus, Pencil, Trash2, ScanBarcode, AlertTriangle } from "lucide-react";
 import Select from "react-select";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
@@ -12,7 +13,6 @@ import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
-import { useAuthStore } from "../store/authStore";
 import { useThemeStore } from "../store/themeStore";
 import JsBarcode from "jsbarcode";
 
@@ -61,8 +61,6 @@ function selectStyles(isDark) {
 }
 
 export default function ProductsPage() {
-  const userRole = useAuthStore((s) => s.user?.role_name);
-  const isAdmin = userRole === "admin";
   const dark = useThemeStore((s) => s.dark);
 
   const [list, setList] = useState([]);
@@ -75,12 +73,7 @@ export default function ProductsPage() {
   const [delId, setDelId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
-  const [catModal, setCatModal] = useState(false);
-  const [newCatName, setNewCatName] = useState("");
-  const [editingCatId, setEditingCatId] = useState(null);
-  const [editCatDraft, setEditCatDraft] = useState("");
-  const [delCategoryId, setDelCategoryId] = useState(null);
-  const [catBusy, setCatBusy] = useState(false);
+  const [lowStockOnly, setLowStockOnly] = useState(false);
 
   const form = useForm({
     defaultValues: {
@@ -92,6 +85,9 @@ export default function ProductsPage() {
       sell_price: 0,
       stock: 0,
       min_stock: 0,
+      unit: "PCS",
+      location: "",
+      brand: "",
       supplier_id: "",
       category_ids: [],
       is_active: true,
@@ -116,7 +112,9 @@ export default function ProductsPage() {
   async function load() {
     setLoading(true);
     try {
-      const { data } = await api.get("/api/products", { params: { q: dq, page, limit: PAGE_SIZE } });
+      const { data } = await api.get("/api/products", {
+        params: { q: dq, page, limit: PAGE_SIZE, ...(lowStockOnly ? { low_stock: 1 } : {}) },
+      });
       setList(data.data || []);
       setTotal(data.total || 0);
     } finally {
@@ -126,7 +124,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     load();
-  }, [dq, page]);
+  }, [dq, page, lowStockOnly]);
 
   useEffect(() => {
     refreshCategories();
@@ -135,62 +133,6 @@ export default function ProductsPage() {
       setSuppliers(s);
     })();
   }, [refreshCategories]);
-
-  useEffect(() => {
-    if (catModal) refreshCategories();
-  }, [catModal, refreshCategories]);
-
-  async function addCategory() {
-    const name = newCatName.trim();
-    if (!name) return;
-    setCatBusy(true);
-    const t = toast.loading("Menyimpan...");
-    try {
-      await api.post("/api/categories", { name });
-      toast.success("Kategori ditambahkan", { id: t });
-      setNewCatName("");
-      await refreshCategories();
-    } catch {
-      toast.dismiss(t);
-    } finally {
-      setCatBusy(false);
-    }
-  }
-
-  async function saveCategoryEdit(id) {
-    const name = editCatDraft.trim();
-    if (!name) return;
-    setCatBusy(true);
-    const t = toast.loading("Menyimpan...");
-    try {
-      await api.put(`/api/categories/${id}`, { name });
-      toast.success("Diperbarui", { id: t });
-      setEditingCatId(null);
-      await refreshCategories();
-    } catch {
-      toast.dismiss(t);
-    } finally {
-      setCatBusy(false);
-    }
-  }
-
-  async function deleteCategory() {
-    if (!delCategoryId) return;
-    const t = toast.loading("Menghapus...");
-    try {
-      await api.delete(`/api/categories/${delCategoryId}`);
-      toast.success("Kategori dihapus", { id: t });
-      setDelCategoryId(null);
-      const curIds = form.getValues("category_ids") || [];
-      form.setValue(
-        "category_ids",
-        curIds.filter((cid) => Number(cid) !== Number(delCategoryId))
-      );
-      await refreshCategories();
-    } catch {
-      toast.dismiss(t);
-    }
-  }
 
   function openCreate() {
     form.reset({
@@ -202,6 +144,9 @@ export default function ProductsPage() {
       sell_price: 0,
       stock: 0,
       min_stock: 5,
+      unit: "PCS",
+      location: "",
+      brand: "",
       supplier_id: "",
       category_ids: [],
       is_active: true,
@@ -213,6 +158,9 @@ export default function ProductsPage() {
     api.get(`/api/products/${p.id}`).then(({ data }) => {
       form.reset({
         ...data,
+        unit: data.unit || "PCS",
+        location: data.location || "",
+        brand: data.brand || "",
         supplier_id: data.supplier_id || "",
         category_ids: data.category_ids || [],
       });
@@ -228,6 +176,9 @@ export default function ProductsPage() {
       purchase_price: Number(values.purchase_price),
       sell_price: Number(values.sell_price),
       min_stock: Number(values.min_stock),
+      unit: values.unit || "PCS",
+      location: values.location || null,
+      brand: values.brand || null,
     };
     const t = toast.loading("Menyimpan...");
     try {
@@ -252,11 +203,15 @@ export default function ProductsPage() {
     load();
   }
 
-  function printBarcode(code) {
-    const w = window.open("", "_blank", "width=320,height=200");
+  function printBarcode(product) {
+    const code = product?.barcode || product?.sku || product;
+    const name = typeof product === "object" && product?.name ? String(product.name) : "";
+    if (!code) return toast.error("Tanpa kode barcode/SKU");
+    const w = window.open("", "_blank", "width=320,height=260");
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    JsBarcode(svg, code, { format: "CODE128", width: 2, height: 60, displayValue: true });
-    w.document.write(`<!DOCTYPE html><html><body style="margin:12px;text-align:center">${svg.outerHTML}</body></html>`);
+    JsBarcode(svg, String(code), { format: "CODE128", width: 1.8, height: 52, displayValue: true, fontSize: 11 });
+    const title = name ? `<div style="font-weight:600;font-size:13px;margin-bottom:8px">${name.replace(/</g, "&lt;")}</div>` : "";
+    w.document.write(`<!DOCTYPE html><html><body style="margin:12px;text-align:center;font-family:sans-serif">${title}${svg.outerHTML}</body></html>`);
     w.document.close();
     w.onload = () => {
       w.print();
@@ -271,15 +226,28 @@ export default function ProductsPage() {
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Produk</h1>
-          <p className="text-sm text-slate-500">Kelola SKU, harga, stok & barcode</p>
+          <p className="text-sm text-slate-500">SKU, kategori, harga, terjual, stok tipis — halaman barcode terpisah</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => setCatModal(true)}
+          <Link
+            to="/app/categories"
             className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
           >
-            <Tag className="h-5 w-5 text-brand-600" /> Kelola kategori
+            Data kategori
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              setPage(1);
+              setLowStockOnly((v) => !v);
+            }}
+            className={`inline-flex items-center justify-center gap-2 rounded-2xl border px-4 py-2.5 text-sm font-semibold shadow-sm ${
+              lowStockOnly
+                ? "border-amber-500 bg-amber-50 text-amber-900 dark:bg-amber-950/40 dark:text-amber-100"
+                : "border-slate-200 bg-white text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            }`}
+          >
+            <AlertTriangle className="h-5 w-5" /> Stok limit
           </button>
           <button
             type="button"
@@ -301,34 +269,35 @@ export default function ProductsPage() {
         }}
       />
 
-      <div className={PAGE_TABLE_WRAP}>
+      <div className={`${PAGE_TABLE_WRAP} overflow-x-auto`}>
         {loading ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={6} />
+            <TableSkeleton rows={6} cols={12} />
           </div>
         ) : (
-          <table className={`${PAGE_TABLE} divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
+          <table className={`${PAGE_TABLE} min-w-[960px] divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
             <thead className="bg-slate-50 dark:bg-slate-800/80">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold">Produk</th>
-                <th className="px-4 py-3 text-left font-semibold">SKU</th>
-                <th className="px-4 py-3 text-right font-semibold">Beli</th>
-                <th className="px-4 py-3 text-right font-semibold">Jual</th>
-                <th className="px-4 py-3 text-right font-semibold">Stok</th>
-                <th className="px-4 py-3 text-right font-semibold">Aksi</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Aksi</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">SKU</th>
+                <th className="min-w-[8rem] px-4 py-3 text-left font-semibold">Nama</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Beli</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Jual</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Stok</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Terjual</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Satuan</th>
+                <th className="min-w-[6rem] px-4 py-3 text-left font-semibold">Kategori</th>
+                <th className="min-w-[5rem] px-4 py-3 text-left font-semibold">Lokasi</th>
+                <th className="min-w-[5rem] px-4 py-3 text-left font-semibold">Merek</th>
+                <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">ID</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {list.map((p) => (
                 <tr key={p.id}>
-                  <td className="px-4 py-3 font-medium">{p.name}</td>
-                  <td className="px-4 py-3 text-slate-500">{p.sku}</td>
-                  <td className="px-4 py-3 text-right">{formatIDR(p.purchase_price)}</td>
-                  <td className="px-4 py-3 text-right">{formatIDR(p.sell_price)}</td>
-                  <td className="px-4 py-3 text-right">{p.stock}</td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-1">
-                      <button type="button" className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => printBarcode(p.barcode || p.sku)}>
+                    <div className="flex flex-nowrap justify-end gap-1">
+                      <button type="button" className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => printBarcode(p)}>
                         <ScanBarcode className="h-4 w-4" />
                       </button>
                       <label className="cursor-pointer rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800">
@@ -343,6 +312,19 @@ export default function ProductsPage() {
                       </button>
                     </div>
                   </td>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{p.sku}</td>
+                  <td className="px-4 py-3 font-medium">{p.name}</td>
+                  <td className="px-4 py-3 text-right">{formatIDR(p.purchase_price)}</td>
+                  <td className="px-4 py-3 text-right">{formatIDR(p.sell_price)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{p.stock}</td>
+                  <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
+                    {Number(p.qty_sold || 0).toLocaleString("id-ID")}
+                  </td>
+                  <td className="px-4 py-3">{p.unit || "PCS"}</td>
+                  <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400">{p.categories || "—"}</td>
+                  <td className="px-4 py-3 text-xs">{p.location || "—"}</td>
+                  <td className="px-4 py-3 text-xs">{p.brand || "—"}</td>
+                  <td className="px-4 py-3 text-right font-mono text-xs">{String(p.id).padStart(6, "0")}</td>
                 </tr>
               ))}
             </tbody>
@@ -398,6 +380,18 @@ export default function ProductsPage() {
             <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("min_stock")} />
           </div>
           <div>
+            <label className="text-xs text-slate-500">Satuan</label>
+            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("unit")} placeholder="PCS" />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Lokasi</label>
+            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("location")} />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Merek / tipe</label>
+            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("brand")} />
+          </div>
+          <div>
             <label className="text-xs text-slate-500">Supplier</label>
             <select className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("supplier_id")}>
               <option value="">—</option>
@@ -420,7 +414,7 @@ export default function ProductsPage() {
                   value={categoryOptions.filter((o) => (field.value || []).map(Number).includes(Number(o.value)))}
                   onChange={(chosen) => field.onChange((chosen || []).map((c) => c.value))}
                   placeholder="Pilih satu atau beberapa kategori…"
-                  noOptionsMessage={() => "Belum ada kategori — kelola dari tombol atas"}
+                  noOptionsMessage={() => "Belum ada kategori — buka halaman Data kategori"}
                   classNamePrefix="prs"
                   className="mt-1"
                   styles={resolvedSelectStyles}
@@ -449,96 +443,6 @@ export default function ProductsPage() {
         </form>
       </Modal>
 
-      <Modal open={catModal} title="Kelola kategori" onClose={() => { setCatModal(false); setEditingCatId(null); }}>
-        <div className="space-y-4">
-          <form
-            className="flex flex-col gap-2 sm:flex-row sm:items-end"
-            onSubmit={(e) => {
-              e.preventDefault();
-              addCategory();
-            }}
-          >
-            <div className="min-w-0 flex-1">
-              <label className="text-xs text-slate-500">Nama kategori baru</label>
-              <input
-                className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-                value={newCatName}
-                onChange={(e) => setNewCatName(e.target.value)}
-                placeholder="contoh: Tanaman hias"
-                disabled={catBusy}
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={catBusy || !newCatName.trim()}
-              className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            >
-              Tambah
-            </button>
-          </form>
-
-          <ul className="max-h-64 divide-y divide-slate-100 overflow-y-auto rounded-xl border dark:divide-slate-800 dark:border-slate-800">
-            {categories.length === 0 && (
-              <li className="px-3 py-8 text-center text-sm text-slate-500">Belum ada kategori</li>
-            )}
-            {categories.map((c) => (
-              <li key={c.id} className="flex flex-wrap items-center gap-2 px-3 py-2">
-                {editingCatId === c.id ? (
-                  <>
-                    <input
-                      className="min-w-[8rem] flex-1 rounded-lg border px-2 py-1.5 text-sm dark:border-slate-700 dark:bg-slate-950"
-                      value={editCatDraft}
-                      onChange={(e) => setEditCatDraft(e.target.value)}
-                      disabled={catBusy}
-                    />
-                    <button
-                      type="button"
-                      disabled={catBusy}
-                      className="rounded-lg bg-brand-600 px-3 py-1 text-xs font-semibold text-white"
-                      onClick={() => saveCategoryEdit(c.id)}
-                    >
-                      Simpan
-                    </button>
-                    <button type="button" className="rounded-lg border px-3 py-1 text-xs dark:border-slate-700" onClick={() => setEditingCatId(null)} disabled={catBusy}>
-                      Batal
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <span className="min-w-0 flex-1 text-sm font-medium text-slate-900 dark:text-white">{c.name}</span>
-                    <button
-                      type="button"
-                      className="rounded-lg p-1.5 hover:bg-slate-100 dark:hover:bg-slate-800"
-                      onClick={() => {
-                        setEditingCatId(c.id);
-                        setEditCatDraft(c.name);
-                      }}
-                      aria-label={`Edit ${c.name}`}
-                    >
-                      <Pencil className="h-4 w-4 text-slate-600 dark:text-slate-400" />
-                    </button>
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30"
-                        onClick={() => setDelCategoryId(c.id)}
-                        aria-label={`Hapus ${c.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    )}
-                  </>
-                )}
-              </li>
-            ))}
-          </ul>
-
-          <p className="text-xs text-slate-500">
-            Hapus kategori hanya untuk admin (relasi produk akan dilepas otomatis). Owner dapat menambah dan mengedit nama.
-          </p>
-        </div>
-      </Modal>
-
       <ConfirmDialog
         open={!!delId}
         title="Hapus produk?"
@@ -552,14 +456,6 @@ export default function ProductsPage() {
         onClose={() => setDelId(null)}
       />
 
-      <ConfirmDialog
-        open={!!delCategoryId}
-        title="Hapus kategori?"
-        message="Produk yang memakai kategori ini akan kehilangan tag ini. Lanjutkan?"
-        danger
-        onConfirm={deleteCategory}
-        onClose={() => setDelCategoryId(null)}
-      />
     </PageStack>
   );
 }

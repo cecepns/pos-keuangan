@@ -255,16 +255,16 @@ app.get(
               COALESCE(SUM(total_profit),0) AS profit,
               COUNT(*) AS trx_count,
               COALESCE(SUM((SELECT SUM(qty) FROM transaction_items ti WHERE ti.transaction_id = transactions.id)),0) AS items_sold
-       FROM transactions WHERE status='completed' AND DATE(created_at) = ?`,
+       FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) = ?`,
       [dateStr]
     );
 
     const [[monthCompare]] = await pool.query(
       `SELECT
-        COALESCE(SUM(CASE WHEN YEAR(created_at)=YEAR(CURDATE()) AND MONTH(created_at)=MONTH(CURDATE()) THEN grand_total END),0) AS omzet_now,
-        COALESCE(SUM(CASE WHEN YEAR(created_at)=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(created_at)=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN grand_total END),0) AS omzet_prev,
-        COALESCE(SUM(CASE WHEN YEAR(created_at)=YEAR(CURDATE()) AND MONTH(created_at)=MONTH(CURDATE()) THEN total_margin END),0) AS margin_now,
-        COALESCE(SUM(CASE WHEN YEAR(created_at)=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(created_at)=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN total_margin END),0) AS margin_prev
+        COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(CURDATE()) AND MONTH(COALESCE(sale_date, created_at))=MONTH(CURDATE()) THEN grand_total END),0) AS omzet_now,
+        COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(COALESCE(sale_date, created_at))=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN grand_total END),0) AS omzet_prev,
+        COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(CURDATE()) AND MONTH(COALESCE(sale_date, created_at))=MONTH(CURDATE()) THEN total_margin END),0) AS margin_now,
+        COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(COALESCE(sale_date, created_at))=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN total_margin END),0) AS margin_prev
        FROM transactions WHERE status='completed'`
     );
 
@@ -306,15 +306,15 @@ app.get(
     }
 
     const [salesSeries] = await pool.query(
-      `SELECT DATE(created_at) AS d, SUM(grand_total) AS total
-       FROM transactions WHERE status='completed' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-       GROUP BY DATE(created_at) ORDER BY d`
+      `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(grand_total) AS total
+       FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+       GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`
     );
 
     const [profitSeries] = await pool.query(
-      `SELECT DATE(created_at) AS d, SUM(total_profit) AS total
-       FROM transactions WHERE status='completed' AND created_at >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
-       GROUP BY DATE(created_at) ORDER BY d`
+      `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(total_profit) AS total
+       FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
+       GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`
     );
 
     const kasirSimple = role === "kasir";
@@ -373,7 +373,12 @@ app.post(
   asyncHandler(async (req, res) => {
     const name = String(req.body.name || "").trim();
     if (!name) return res.status(400).json({ error: "Nama wajib" });
-    const [r] = await pool.query(`INSERT INTO categories (name, slug) VALUES (?, ?)`, [name, name.toLowerCase().replace(/\s+/g, "-")]);
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    const [r] = await pool.query(`INSERT INTO categories (name, code, slug) VALUES (?, ?, ?)`, [
+      name,
+      code,
+      name.toLowerCase().replace(/\s+/g, "-"),
+    ]);
     res.status(201).json({ id: r.insertId });
   })
 );
@@ -383,7 +388,8 @@ app.put(
   requireAuth,
   requireRoles("admin", "owner"),
   asyncHandler(async (req, res) => {
-    await pool.query(`UPDATE categories SET name=? WHERE id=?`, [req.body.name, req.params.id]);
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    await pool.query(`UPDATE categories SET name=?, code=? WHERE id=?`, [req.body.name, code, req.params.id]);
     res.json({ ok: true });
   })
 );
@@ -436,9 +442,15 @@ app.get(
       where += " AND p.is_active = ?";
       params.push(Number(req.query.active));
     }
+    if (req.query.low_stock === "1" || req.query.low_stock === "true") {
+      where += " AND p.stock <= p.min_stock AND p.is_active = 1";
+    }
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS p.*,
-        (SELECT GROUP_CONCAT(c.name) FROM product_categories pc JOIN categories c ON c.id=pc.category_id WHERE pc.product_id=p.id) AS categories
+        (SELECT GROUP_CONCAT(c.name) FROM product_categories pc JOIN categories c ON c.id=pc.category_id WHERE pc.product_id=p.id) AS categories,
+        (SELECT COALESCE(SUM(ti.qty),0) FROM transaction_items ti
+           INNER JOIN transactions t ON t.id = ti.transaction_id
+           WHERE ti.product_id = p.id AND t.status = 'completed') AS qty_sold
        FROM products p ${where} ORDER BY p.id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
@@ -472,8 +484,8 @@ app.post(
     let barcode = b.barcode ? String(b.barcode).trim() : null;
     if (!barcode) barcode = `899${String(Date.now()).slice(-9)}`;
     const [r] = await pool.query(
-      `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, is_active)
-       VALUES (?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, unit, location, brand, is_active)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         sku,
         barcode,
@@ -484,6 +496,9 @@ app.post(
         Number(b.sell_price || 0),
         Number(b.stock || 0),
         Number(b.min_stock || 0),
+        String(b.unit || "PCS").trim() || "PCS",
+        b.location != null ? String(b.location).trim() || null : null,
+        b.brand != null ? String(b.brand).trim() || null : null,
         b.is_active === false ? 0 : 1,
       ]
     );
@@ -505,7 +520,7 @@ app.put(
     const b = req.body;
     await pool.query(
       `UPDATE products SET sku=?, barcode=?, name=?, description=?, supplier_id=?, purchase_price=?, sell_price=?,
-       min_stock=?, is_active=? WHERE id=?`,
+       min_stock=?, unit=?, location=?, brand=?, is_active=? WHERE id=?`,
       [
         b.sku,
         b.barcode,
@@ -515,6 +530,9 @@ app.put(
         b.purchase_price,
         b.sell_price,
         b.min_stock,
+        String(b.unit || "PCS").trim() || "PCS",
+        b.location != null ? String(b.location).trim() || null : null,
+        b.brand != null ? String(b.brand).trim() || null : null,
         b.is_active ? 1 : 0,
         req.params.id,
       ]
@@ -558,22 +576,72 @@ app.post(
   requireRoles("admin", "owner"),
   asyncHandler(async (req, res) => {
     const { product_id, type, qty, notes } = req.body;
-    if (!product_id || !type || !qty) return res.status(400).json({ error: "Data tidak lengkap" });
+    if (!product_id || !type || qty === undefined || qty === null || qty === "")
+      return res.status(400).json({ error: "Data tidak lengkap" });
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const sign = type === "in" || type === "purchase" ? 1 : type === "out" || type === "sale" ? -1 : qty >= 0 ? 1 : -1;
-      const delta = Math.abs(Number(qty)) * sign;
-      await conn.query(
-        `INSERT INTO stock_movements (product_id, type, qty, notes, created_by) VALUES (?,?,?,?,?)`,
-        [product_id, type, Math.abs(Number(qty)), notes || null, req.user.id]
-      );
+      const raw = Number(qty);
+      let delta;
+      let qtyStored;
+      if (type === "adjustment") {
+        delta = raw;
+        qtyStored = raw;
+      } else {
+        const sign = type === "in" || type === "purchase" ? 1 : type === "out" || type === "sale" ? -1 : raw >= 0 ? 1 : -1;
+        qtyStored = Math.abs(raw);
+        delta = qtyStored * sign;
+      }
+      await conn.query(`INSERT INTO stock_movements (product_id, type, qty, notes, created_by) VALUES (?,?,?,?,?)`, [
+        product_id,
+        type,
+        qtyStored,
+        notes || null,
+        req.user.id,
+      ]);
       await conn.query(`UPDATE products SET stock = stock + ? WHERE id=?`, [delta, product_id]);
       await conn.commit();
       res.status(201).json({ ok: true });
     } catch (e) {
       await conn.rollback();
       throw e;
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+app.post(
+  "/api/stock/physical-adjust",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const product_id = Number(req.body.product_id);
+    const actual = Number(req.body.actual_stock);
+    const notes = req.body.notes != null ? String(req.body.notes).trim() : "";
+    if (!product_id || Number.isNaN(actual) || actual < 0) return res.status(400).json({ error: "Data tidak valid" });
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [pr] = await conn.query(`SELECT id, stock, name FROM products WHERE id=? FOR UPDATE`, [product_id]);
+      if (!pr.length) throw new Error("Produk tidak ada");
+      const current = Number(pr[0].stock);
+      const delta = actual - current;
+      await conn.query(`UPDATE products SET stock=? WHERE id=?`, [actual, product_id]);
+      if (delta !== 0) {
+        await conn.query(`INSERT INTO stock_movements (product_id, type, qty, notes, created_by) VALUES (?,?,?,?,?)`, [
+          product_id,
+          "adjustment",
+          delta,
+          notes || `Penyesuaian fisik (${current} → ${actual})`,
+          req.user.id,
+        ]);
+      }
+      await conn.commit();
+      res.status(201).json({ ok: true, stock: actual, delta });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message || "Gagal" });
     } finally {
       conn.release();
     }
@@ -963,11 +1031,11 @@ app.get(
       params.push(req.query.status);
     }
     if (req.query.from) {
-      where += " AND DATE(created_at) >= ?";
+      where += " AND COALESCE(t.sale_date, DATE(t.created_at)) >= ?";
       params.push(req.query.from);
     }
     if (req.query.to) {
-      where += " AND DATE(created_at) <= ?";
+      where += " AND COALESCE(t.sale_date, DATE(t.created_at)) <= ?";
       params.push(req.query.to);
     }
     const [rows] = await pool.query(
@@ -1071,6 +1139,16 @@ app.post(
 );
 
 app.get(
+  "/api/cash-flows/next-code",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (_req, res) => {
+    const [[r]] = await pool.query(`SELECT LPAD(IFNULL(MAX(id),0)+1, 6, '0') AS code FROM cash_flows`);
+    res.json({ code: r.code });
+  })
+);
+
+app.get(
   "/api/cash-flows",
   requireAuth,
   ownerOrAdmin,
@@ -1089,6 +1167,10 @@ app.get(
     if (req.query.account_id) {
       where += " AND cash_account_id=?";
       params.push(req.query.account_id);
+    }
+    if (req.query.type) {
+      where += " AND cf.type=?";
+      params.push(req.query.type);
     }
     const q = String(req.query.q || "").trim();
     if (q) {
@@ -1333,16 +1415,16 @@ app.get(
     const to = req.query.to || new Date().toISOString().slice(0, 10);
     const [[{ cnt }]] = await pool.query(
       `SELECT COUNT(*) AS cnt FROM (
-         SELECT DATE(created_at) AS d FROM transactions
-         WHERE status='completed' AND DATE(created_at) BETWEEN ? AND ?
-         GROUP BY DATE(created_at)
+         SELECT COALESCE(sale_date, DATE(created_at)) AS d FROM transactions
+         WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) BETWEEN ? AND ?
+         GROUP BY COALESCE(sale_date, DATE(created_at))
        ) x`,
       [from, to]
     );
     const [rows] = await pool.query(
-      `SELECT DATE(created_at) AS d, SUM(grand_total) AS omzet, SUM(total_profit) AS profit, COUNT(*) AS trx
-       FROM transactions WHERE status='completed' AND DATE(created_at) BETWEEN ? AND ?
-       GROUP BY DATE(created_at) ORDER BY d LIMIT ? OFFSET ?`,
+      `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(grand_total) AS omzet, SUM(total_profit) AS profit, COUNT(*) AS trx
+       FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) BETWEEN ? AND ?
+       GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d LIMIT ? OFFSET ?`,
       [from, to, limit, offset]
     );
     res.json({ data: rows, total: cnt, page, limit });
@@ -1368,8 +1450,8 @@ app.get(
          JOIN products p ON p.id=ti.product_id
          JOIN transactions t ON t.id=ti.transaction_id
          WHERE t.status='completed'
-         AND (? IS NULL OR DATE(t.created_at) >= ?)
-         AND (? IS NULL OR DATE(t.created_at) <= ?)
+         AND (? IS NULL OR COALESCE(t.sale_date, DATE(t.created_at)) >= ?)
+         AND (? IS NULL OR COALESCE(t.sale_date, DATE(t.created_at)) <= ?)
          ${nameFilter}
          GROUP BY p.id
        ) z`,
@@ -1382,8 +1464,8 @@ app.get(
        JOIN products p ON p.id=ti.product_id
        JOIN transactions t ON t.id=ti.transaction_id
        WHERE t.status='completed'
-       AND (? IS NULL OR DATE(t.created_at) >= ?)
-       AND (? IS NULL OR DATE(t.created_at) <= ?)
+       AND (? IS NULL OR COALESCE(t.sale_date, DATE(t.created_at)) >= ?)
+       AND (? IS NULL OR COALESCE(t.sale_date, DATE(t.created_at)) <= ?)
        ${nameFilter}
        GROUP BY p.id ORDER BY qty DESC LIMIT ? OFFSET ?`,
       dataParams
@@ -1429,6 +1511,104 @@ app.get(
       dataParams
     );
     res.json({ data: rows, total: countRow.cnt, page, limit });
+  })
+);
+
+app.get(
+  "/api/reports/stock-summary",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, offset } = listPagination(req);
+    const q = String(req.query.q || "").trim();
+    let nameWhere = "WHERE p.is_active = 1";
+    const params = [];
+    if (q) {
+      nameWhere += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)";
+      const qq = `%${q}%`;
+      params.push(qq, qq, qq);
+    }
+    const [[{ cnt }]] = await pool.query(`SELECT COUNT(*) AS cnt FROM products p ${nameWhere}`, params);
+    const [rows] = await pool.query(
+      `SELECT p.id, p.sku, p.name, p.stock AS balance,
+        (SELECT GROUP_CONCAT(DISTINCT c.name ORDER BY c.name)
+           FROM product_categories pc JOIN categories c ON c.id = pc.category_id WHERE pc.product_id = p.id) AS categories,
+        COALESCE(SUM(CASE WHEN sm.type IN ('in','purchase','refund') THEN ABS(sm.qty) ELSE 0 END), 0) AS qty_in,
+        COALESCE(SUM(CASE WHEN sm.type IN ('out','sale') THEN ABS(sm.qty) ELSE 0 END), 0) AS qty_out,
+        COALESCE(SUM(CASE WHEN sm.type = 'adjustment' THEN sm.qty ELSE 0 END), 0) AS qty_adjust
+       FROM products p
+       LEFT JOIN stock_movements sm ON sm.product_id = p.id
+       ${nameWhere}
+       GROUP BY p.id
+       ORDER BY p.name ASC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    res.json({ data: rows, total: cnt, page, limit });
+  })
+);
+
+app.get(
+  "/api/reports/profit-loss",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const from =
+      req.query.from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
+    const to = req.query.to || new Date().toISOString().slice(0, 10);
+    const dateExpr = "COALESCE(sale_date, DATE(created_at))";
+    const [[sales]] = await pool.query(
+      `SELECT
+         COALESCE(SUM(grand_total),0) AS revenue,
+         COALESCE(SUM(total_cost),0) AS hpp,
+         COALESCE(SUM(tax_amount),0) AS tax_amount,
+         COALESCE(SUM(total_profit),0) AS gross_profit
+       FROM transactions
+       WHERE status='completed' AND ${dateExpr} BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const [[ops]] = await pool.query(
+      `SELECT COALESCE(SUM(amount),0) AS total FROM cash_flows WHERE type='out' AND flow_date BETWEEN ? AND ?`,
+      [from, to]
+    );
+    const [breakdown] = await pool.query(
+      `SELECT COALESCE(ec.name, '(Tanpa kategori)') AS expense_type,
+         COALESCE(SUM(cf.amount),0) AS amount
+       FROM cash_flows cf
+       LEFT JOIN expense_categories ec ON cf.category_type = 'expense' AND cf.category_id = ec.id
+       WHERE cf.type = 'out' AND cf.flow_date BETWEEN ? AND ?
+       GROUP BY ec.id, ec.name
+       HAVING SUM(cf.amount) > 0
+       ORDER BY amount DESC`,
+      [from, to]
+    );
+    const revenue = Number(sales.revenue);
+    const hpp = Number(sales.hpp);
+    const tax = Number(sales.tax_amount);
+    const gross = Number(sales.gross_profit);
+    const expenseTotal = Number(ops.total);
+    const netProfit = gross - expenseTotal;
+    const denom = revenue - tax || revenue || 1;
+    res.json({
+      from,
+      to,
+      summary: {
+        revenue,
+        revenue_after_tax: revenue - tax,
+        hpp,
+        tax_amount: tax,
+        gross_profit: gross,
+        operational_expense: expenseTotal,
+        net_profit: netProfit,
+        pct_gross: denom !== 0 ? (gross / denom) * 100 : null,
+        pct_net: denom !== 0 ? (netProfit / denom) * 100 : null,
+      },
+      expense_breakdown: breakdown.map((r) => ({
+        expense_type: r.expense_type,
+        amount: Number(r.amount),
+        pct: expenseTotal > 0 ? (Number(r.amount) / expenseTotal) * 100 : 0,
+      })),
+    });
   })
 );
 

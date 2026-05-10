@@ -28,6 +28,8 @@ export default function TransactionsPage() {
   const [page, setPage] = useState(1);
   const [q, setQ] = useState("");
   const dq = useDebouncedValue(q, 350);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [loading, setLoading] = useState(true);
   const [refundId, setRefundId] = useState(null);
   const [detailId, setDetailId] = useState(null);
@@ -37,7 +39,10 @@ export default function TransactionsPage() {
   async function load() {
     setLoading(true);
     try {
-      const { data } = await api.get("/api/transactions", { params: { q: dq, page, limit: PAGE_SIZE } });
+      const params = { q: dq, page, limit: PAGE_SIZE };
+      if (from) params.from = from;
+      if (to) params.to = to;
+      const { data } = await api.get("/api/transactions", { params });
       setList(data.data || []);
       setTotal(data.total || 0);
     } finally {
@@ -47,7 +52,12 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     load();
-  }, [dq, page]);
+  }, [dq, page, from, to]);
+
+  function displayTxDate(x) {
+    if (x.sale_date) return formatDateID(x.sale_date);
+    return formatDateTimeID(x.created_at);
+  }
 
   useEffect(() => {
     if (!detailId) {
@@ -143,15 +153,54 @@ export default function TransactionsPage() {
         <p className="text-sm text-slate-500">Riwayat, detail transaksi, dan refund</p>
       </div>
 
-      <input
-        className="max-w-md rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
-        placeholder="Cari invoice..."
-        value={q}
-        onChange={(e) => {
-          setPage(1);
-          setQ(e.target.value);
-        }}
-      />
+      <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end">
+        <input
+          className="max-w-md rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+          placeholder="Cari invoice..."
+          value={q}
+          onChange={(e) => {
+            setPage(1);
+            setQ(e.target.value);
+          }}
+        />
+        <div className="flex flex-wrap items-center gap-2">
+          <div>
+            <label className="text-xs text-slate-500">Dari tanggal</label>
+            <input
+              type="date"
+              className="mt-1 block rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              value={from}
+              onChange={(e) => {
+                setPage(1);
+                setFrom(e.target.value);
+              }}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500">Sampai</label>
+            <input
+              type="date"
+              className="mt-1 block rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              value={to}
+              onChange={(e) => {
+                setPage(1);
+                setTo(e.target.value);
+              }}
+            />
+          </div>
+          <button
+            type="button"
+            className="rounded-xl border px-3 py-2 text-sm"
+            onClick={() => {
+              setFrom("");
+              setTo("");
+              setPage(1);
+            }}
+          >
+            Reset tanggal
+          </button>
+        </div>
+      </div>
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
@@ -163,7 +212,7 @@ export default function TransactionsPage() {
             <thead className="bg-slate-50 dark:bg-slate-800/80">
               <tr>
                 <th className="px-4 py-3 text-left">Invoice</th>
-                <th className="px-4 py-3 text-left">Waktu</th>
+                <th className="px-4 py-3 text-left">Tgl transaksi</th>
                 <th className="px-4 py-3 text-left">Pelanggan</th>
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-left">Status</th>
@@ -174,7 +223,7 @@ export default function TransactionsPage() {
               {list.map((x) => (
                 <tr key={x.id}>
                   <td className="px-4 py-3 font-mono text-xs">{x.invoice_no}</td>
-                  <td className="px-4 py-3">{formatDateTimeID(x.created_at)}</td>
+                  <td className="px-4 py-3">{displayTxDate(x)}</td>
                   <td className="px-4 py-3">{x.customer_name || "—"}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
                   <td className="px-4 py-3 capitalize">{x.status}</td>
