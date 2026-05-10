@@ -112,11 +112,12 @@ export default function StockAdjustPage() {
         <div>
           <label className="text-xs text-slate-500">Stok aktual (fisik)</label>
           <input
-            type="number"
-            min={0}
+            type="text"
+            inputMode="numeric"
             className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
             value={actual}
-            onChange={(e) => setActual(e.target.value)}
+            onChange={(e) => setActual(e.target.value.replace(/\D/g, "").slice(0, 9))}
+            placeholder="0"
           />
         </div>
         <div>

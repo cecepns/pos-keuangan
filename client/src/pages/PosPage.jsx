@@ -21,6 +21,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { PageStack } from "../components/TableCard";
 import { buildThermalReceiptHtml, buildReceiptWhatsAppText } from "../utils/receipt";
+import { parseOptionalFloat, parseOptionalInt } from "../utils/numericInput";
 
 const PRODUCT_PAGE_SIZE = 48;
 
@@ -48,16 +49,21 @@ export default function PosPage() {
     thermal_width_mm: "80",
   });
   const [payOpen, setPayOpen] = useState(false);
-  const [cashAmt, setCashAmt] = useState(0);
+  const [cashAmtStr, setCashAmtStr] = useState("");
   const [cashAccountId, setCashAccountId] = useState("");
-  const [transferAmt, setTransferAmt] = useState(0);
+  const [transferAmtStr, setTransferAmtStr] = useState("");
   const [transferAcc, setTransferAcc] = useState("");
-  const [qrisAmt, setQrisAmt] = useState(0);
+  const [qrisAmtStr, setQrisAmtStr] = useState("");
   const [qrisAcc, setQrisAcc] = useState("");
-  const [debtAmt, setDebtAmt] = useState(0);
+  const [debtAmtStr, setDebtAmtStr] = useState("");
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeProdId, setBarcodeProdId] = useState("");
-  const [barcodeCopies, setBarcodeCopies] = useState(1);
+  /** String agar bisa dikosongkan saat diketik */
+  const [barcodeCopies, setBarcodeCopies] = useState("1");
+  /** { [product_id]: { qty?, sell?, disc? } } */
+  const [lineDraft, setLineDraft] = useState({});
+  const [discountDraft, setDiscountDraft] = useState(null);
+  const [taxDraft, setTaxDraft] = useState(null);
   const barcodeRef = useRef(null);
 
   const fetchProductPage = useCallback(
@@ -171,10 +177,10 @@ export default function PosPage() {
         if (c.product_id !== id) return c;
         let next = { ...c, ...patch };
         if (patch.qty != null) {
-          const srv = liveStock(c.product_id, c.stock);
-          const otherRes = (reservedByProduct[c.product_id] || 0) - c.qty;
-          const cap = Math.max(1, Math.max(0, srv - otherRes));
-          const mq = Math.max(1, Math.min(Number(patch.qty) || 1, cap));
+          const cap = lineQtyCap(c);
+          let n = typeof patch.qty === "number" ? patch.qty : Number(patch.qty);
+          if (!Number.isFinite(n)) n = c.qty;
+          const mq = Math.max(1, Math.min(Math.trunc(n), cap));
           next.qty = mq;
         }
         if (patch.discount_amount != null) {
@@ -187,7 +193,18 @@ export default function PosPage() {
   }
 
   function removeLine(id) {
+    setLineDraft((m) => {
+      const next = { ...m };
+      delete next[id];
+      return next;
+    });
     setCart(cart.filter((c) => c.product_id !== id));
+  }
+
+  function lineQtyCap(c) {
+    const srv = liveStock(c.product_id, c.stock);
+    const otherRes = (reservedByProduct[c.product_id] || 0) - c.qty;
+    return Math.max(1, Math.max(0, srv - otherRes));
   }
 
   const subtotal = useMemo(
@@ -198,7 +215,7 @@ export default function PosPage() {
   const grandTotal = useMemo(() => subtotal - discountTotal + taxAmount, [subtotal, discountTotal, taxAmount]);
 
   useEffect(() => {
-    if (payOpen && grandTotal > 0) setCashAmt(grandTotal);
+    if (payOpen && grandTotal > 0) setCashAmtStr(String(Math.round(grandTotal)));
   }, [payOpen, grandTotal]);
 
   const marginTotal = useMemo(
@@ -229,6 +246,11 @@ export default function PosPage() {
     const res = reservedByProduct[p.id] || 0;
     return Math.max(0, st - res);
   }
+
+  const cashAmt = Number.parseFloat(String(cashAmtStr).trim()) || 0;
+  const transferAmt = Number.parseFloat(String(transferAmtStr).trim()) || 0;
+  const qrisAmt = Number.parseFloat(String(qrisAmtStr).trim()) || 0;
+  const debtAmt = Number.parseFloat(String(debtAmtStr).trim()) || 0;
 
   const paidSumDraft = cashAmt + transferAmt + qrisAmt + debtAmt;
   const kembalianDraft = Math.max(0, paidSumDraft - grandTotal);
@@ -286,12 +308,14 @@ export default function PosPage() {
       toast.success(data.invoice_no || "Tersimpan", { id: t });
       if (status === "completed") {
         setCart([]);
+        setLineDraft({});
         setDiscountTotal(0);
         setNotes("");
         setPayOpen(false);
-        setDebtAmt(0);
-        setTransferAmt(0);
-        setQrisAmt(0);
+        setDebtAmtStr("");
+        setTransferAmtStr("");
+        setQrisAmtStr("");
+        setCashAmtStr("");
         fetchProductPage(1, false).catch(() => {});
         setProductPage(1);
       }
@@ -373,7 +397,7 @@ export default function PosPage() {
     if (!p) return toast.error("Pilih produk");
     const code = p.barcode || p.sku;
     if (!code) return toast.error("Produk tanpa barcode/SKU");
-    const n = Math.min(50, Math.max(1, Number(barcodeCopies) || 1));
+    const n = Math.min(50, Math.max(1, parseOptionalInt(barcodeCopies, 1, { min: 1, max: 50 })));
     const w = window.open("", "_blank", "width=400,height=600");
     if (!w) return toast.error("Popup diblokir");
     const labels = [];
@@ -382,10 +406,10 @@ export default function PosPage() {
       JsBarcode(svg, String(code), { format: "CODE128", width: 1.6, height: 48, displayValue: false, fontSize: 11 });
       const bottom = String(p.barcode || p.sku || code).replace(/</g, "&lt;");
       labels.push(
-        `<div class="lb" style="page-break-after:always;text-align:center;padding:8px;font-family:sans-serif;font-size:11px;">
-          <div style="font-weight:600;margin-bottom:4px;">${String(p.name).replace(/</g, "&lt;")}</div>
+        `<div class="lb" style="page-break-after:always;text-align:center;padding:8px;font-family:sans-serif;font-size:11px;display:flex;flex-direction:column;align-items:center;">
+          <div style="font-weight:600;line-height:1.25;margin:0 0 4px 0;max-width:100%;">${String(p.name).replace(/</g, "&lt;")}</div>
           ${svg.outerHTML}
-          <div style="margin-top:4px;font-family:monospace;font-size:10px;">${bottom}</div>
+          <div style="margin:4px 0 0 0;font-family:monospace;font-size:10px;line-height:1.25;">${bottom}</div>
         </div>`
       );
     }
@@ -550,6 +574,11 @@ export default function PosPage() {
               const gross = c.sell_price * c.qty;
               const disc = Number(c.discount_amount || 0);
               const net = gross - disc;
+              const ld = lineDraft[c.product_id] || {};
+              const qtyShow = ld.qty !== undefined ? ld.qty : String(c.qty);
+              const sellShow = ld.sell !== undefined ? ld.sell : String(c.sell_price);
+              const discShow = ld.disc !== undefined ? ld.disc : String(Number(c.discount_amount || 0));
+              const capQty = lineQtyCap(c);
               return (
                 <div key={c.product_id} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
                   <div className="flex justify-between gap-2">
@@ -570,26 +599,42 @@ export default function PosPage() {
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <label>
                       Qty (maks{" "}
-                      {Math.max(
-                        1,
-                        liveStock(c.product_id, c.stock) - ((reservedByProduct[c.product_id] || 0) - c.qty)
-                      )}
-                      )
+                      {capQty})
                       <div className="flex items-center gap-1">
                         <button type="button" className="rounded bg-white p-1 dark:bg-slate-900" onClick={() => updateLine(c.product_id, { qty: Math.max(1, c.qty - 1) })}>
                           <Minus className="h-3 w-3" />
                         </button>
                         <input
-                          type="number"
+                          type="text"
+                          inputMode="numeric"
                           className="w-full rounded border px-1 dark:border-slate-600 dark:bg-slate-950"
-                          value={c.qty}
-                          onChange={(e) => updateLine(c.product_id, { qty: Number(e.target.value) || 1 })}
+                          value={qtyShow}
+                          onChange={(e) =>
+                            setLineDraft((m) => ({
+                              ...m,
+                              [c.product_id]: { ...(m[c.product_id] || {}), qty: e.target.value.replace(/\D/g, "").slice(0, 9) },
+                            }))
+                          }
+                          onBlur={() => {
+                            const rawQty = lineDraft[c.product_id]?.qty;
+                            setLineDraft((m) => {
+                              const inner = { ...(m[c.product_id] || {}) };
+                              delete inner.qty;
+                              const next = { ...m };
+                              if (Object.keys(inner).length === 0) delete next[c.product_id];
+                              else next[c.product_id] = inner;
+                              return next;
+                            });
+                            updateLine(c.product_id, {
+                              qty: parseOptionalInt(rawQty, c.qty, { min: 1, max: capQty }),
+                            });
+                          }}
                         />
                         <button
                           type="button"
                           className="rounded bg-white p-1 dark:bg-slate-900"
                           onClick={() => updateLine(c.product_id, { qty: c.qty + 1 })}
-                          disabled={c.qty >= c.stock}
+                          disabled={c.qty >= capQty}
                         >
                           <Plus className="h-3 w-3" />
                         </button>
@@ -598,19 +643,58 @@ export default function PosPage() {
                     <label>
                       Harga jual
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         className="mt-1 w-full rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-                        value={c.sell_price}
-                        onChange={(e) => updateLine(c.product_id, { sell_price: Number(e.target.value) })}
+                        value={sellShow}
+                        onChange={(e) =>
+                          setLineDraft((m) => ({
+                            ...m,
+                            [c.product_id]: { ...(m[c.product_id] || {}), sell: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
+                          }))
+                        }
+                        onBlur={() => {
+                          const rawSell = lineDraft[c.product_id]?.sell;
+                          setLineDraft((m) => {
+                            const inner = { ...(m[c.product_id] || {}) };
+                            delete inner.sell;
+                            const next = { ...m };
+                            if (Object.keys(inner).length === 0) delete next[c.product_id];
+                            else next[c.product_id] = inner;
+                            return next;
+                          });
+                          const pv = parseOptionalFloat(rawSell ?? String(c.sell_price), c.sell_price, { min: 0 });
+                          updateLine(c.product_id, { sell_price: pv });
+                        }}
                       />
                     </label>
                     <label className="col-span-2">
                       Diskon baris (rupiah)
                       <input
-                        type="number"
+                        type="text"
+                        inputMode="decimal"
                         className="mt-1 w-full rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-                        value={c.discount_amount}
-                        onChange={(e) => updateLine(c.product_id, { discount_amount: Number(e.target.value) })}
+                        value={discShow}
+                        onChange={(e) =>
+                          setLineDraft((m) => ({
+                            ...m,
+                            [c.product_id]: { ...(m[c.product_id] || {}), disc: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
+                          }))
+                        }
+                        onBlur={() => {
+                          const rawDisc = lineDraft[c.product_id]?.disc;
+                          const g = c.sell_price * c.qty;
+                          setLineDraft((m) => {
+                            const inner = { ...(m[c.product_id] || {}) };
+                            delete inner.disc;
+                            const next = { ...m };
+                            if (Object.keys(inner).length === 0) delete next[c.product_id];
+                            else next[c.product_id] = inner;
+                            return next;
+                          });
+                          const dv = parseOptionalFloat(rawDisc ?? String(disc), disc, { min: 0, max: g });
+                          updateLine(c.product_id, { discount_amount: dv });
+                        }}
                       />
                     </label>
                   </div>
@@ -630,19 +714,31 @@ export default function PosPage() {
             <label className="flex justify-between gap-2 text-sm">
               Diskon total
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 className="w-28 rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-                value={discountTotal}
-                onChange={(e) => setDiscountTotal(Number(e.target.value))}
+                value={discountDraft !== null ? discountDraft : String(discountTotal)}
+                onChange={(e) => setDiscountDraft(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+                onBlur={() => {
+                  if (discountDraft === null) return;
+                  setDiscountTotal(parseOptionalFloat(discountDraft, discountTotal, { min: 0, max: subtotal }));
+                  setDiscountDraft(null);
+                }}
               />
             </label>
             <label className="flex justify-between gap-2 text-sm">
               Pajak %
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 className="w-28 rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-                value={taxPercent}
-                onChange={(e) => setTaxPercent(Number(e.target.value))}
+                value={taxDraft !== null ? taxDraft : String(taxPercent)}
+                onChange={(e) => setTaxDraft(e.target.value.replace(/[^\d.]/g, "").slice(0, 8))}
+                onBlur={() => {
+                  if (taxDraft === null) return;
+                  setTaxPercent(parseOptionalFloat(taxDraft, taxPercent, { min: 0, max: 100 }));
+                  setTaxDraft(null);
+                }}
               />
             </label>
             <div className="flex justify-between text-sm">
@@ -706,11 +802,12 @@ export default function PosPage() {
               ))}
             </select>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:border-slate-600 dark:bg-slate-950"
               placeholder="Jumlah cash (boleh lebih)"
-              value={cashAmt || ""}
-              onChange={(e) => setCashAmt(Number(e.target.value))}
+              value={cashAmtStr}
+              onChange={(e) => setCashAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -724,11 +821,12 @@ export default function PosPage() {
               ))}
             </select>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Jumlah"
-              value={transferAmt || ""}
-              onChange={(e) => setTransferAmt(Number(e.target.value))}
+              value={transferAmtStr}
+              onChange={(e) => setTransferAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -742,21 +840,23 @@ export default function PosPage() {
               ))}
             </select>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Jumlah"
-              value={qrisAmt || ""}
-              onChange={(e) => setQrisAmt(Number(e.target.value))}
+              value={qrisAmtStr}
+              onChange={(e) => setQrisAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
             <p className="text-sm font-medium">Piutang (belum dibayar penuh)</p>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Nominal piutang"
-              value={debtAmt || ""}
-              onChange={(e) => setDebtAmt(Number(e.target.value))}
+              value={debtAmtStr}
+              onChange={(e) => setDebtAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
             />
           </div>
         </div>
@@ -790,12 +890,17 @@ export default function PosPage() {
           <div>
             <label className="text-xs text-slate-500">Jumlah cetak (label)</label>
             <input
-              type="number"
-              min={1}
-              max={50}
+              type="text"
+              inputMode="numeric"
+              maxLength={3}
               className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              placeholder="1"
               value={barcodeCopies}
-              onChange={(e) => setBarcodeCopies(Number(e.target.value) || 1)}
+              onChange={(e) => setBarcodeCopies(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              onBlur={() => {
+                const n = Number.parseInt(String(barcodeCopies).trim(), 10);
+                if (!Number.isFinite(n) || n < 1) setBarcodeCopies("1");
+              }}
             />
           </div>
           <button type="button" onClick={printBarcodeLabels} className="w-full rounded-xl bg-brand-600 py-3 font-semibold text-white">

@@ -15,12 +15,24 @@ const defaultSettings = () => ({
   cols: 3,
 });
 
+function normalizeCols(val) {
+  const n = Number.parseInt(String(val ?? "").trim(), 10);
+  if (!Number.isFinite(n)) return defaultSettings().cols;
+  return Math.min(5, Math.max(1, n));
+}
+
 function loadSettings() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultSettings();
     const p = JSON.parse(raw);
-    return { ...defaultSettings(), ...p, cols: Math.min(5, Math.max(1, Number(p.cols) || 3)) };
+    return {
+      ...defaultSettings(),
+      ...p,
+      top: p.top || defaultSettings().top,
+      bottom: p.bottom || defaultSettings().bottom,
+      cols: normalizeCols(p.cols),
+    };
   } catch {
     return defaultSettings();
   }
@@ -45,7 +57,8 @@ function labelLine(kind, prod) {
 export default function BarcodeLabelsPage() {
   const [products, setProducts] = useState([]);
   const [productId, setProductId] = useState("");
-  const [copies, setCopies] = useState(1);
+  /** String agar bisa dikosongkan saat diketik */
+  const [copies, setCopies] = useState("1");
   const [settings, setSettings] = useState(loadSettings);
 
   useEffect(() => {
@@ -73,7 +86,9 @@ export default function BarcodeLabelsPage() {
   const selected = options.find((o) => o.value === productId);
 
   function persistSettings() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    const payload = { ...settings, cols: normalizeCols(settings.cols) };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    setSettings(payload);
     toast.success("Pengaturan disimpan");
   }
 
@@ -82,8 +97,9 @@ export default function BarcodeLabelsPage() {
     if (!p) return toast.error("Pilih barang");
     const code = p.barcode || p.sku;
     if (!code) return toast.error("Produk tanpa barcode/SKU");
-    const n = Math.min(100, Math.max(1, Number(copies) || 1));
-    const cols = settings.cols;
+    const nParsed = Number.parseInt(String(copies).trim(), 10);
+    const n = Math.min(100, Math.max(1, Number.isFinite(nParsed) ? nParsed : 1));
+    const colCount = normalizeCols(settings.cols);
     const top = labelLine(settings.top, p);
     const bottom = labelLine(settings.bottom, p);
 
@@ -105,14 +121,31 @@ export default function BarcodeLabelsPage() {
     w.document.write(`<!DOCTYPE html><html><head><title>Cetak barcode</title><style>
       * { box-sizing: border-box; }
       body { margin: 0; font-family: system-ui, sans-serif; font-size: 11px; }
-      .grid { display: grid; grid-template-columns: repeat(${cols}, 1fr); gap: 8px 10px; padding: 12px; }
-      .cell { border: 1px dashed #ccc; padding: 8px 6px; text-align: center; break-inside: avoid; page-break-inside: avoid; }
-      .cell .t { font-weight: 600; margin-bottom: 6px; min-height: 2.6em; line-height: 1.2; }
-      .cell .bc { display: flex; justify-content: center; }
-      .cell .b { margin-top: 4px; font-size: 10px; }
+      .grid { display: grid; gap: 8px 10px; padding: 12px; grid-template-columns: repeat(${colCount}, minmax(0, 1fr)); }
+      .cell {
+        border: 1px dashed #ccc;
+        padding: 8px 6px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        break-inside: avoid;
+        page-break-inside: avoid;
+      }
+      .cell .t { font-weight: 600; line-height: 1.25; margin: 0 0 4px 0; max-width: 100%; word-break: break-word; }
+      .cell .bc { display: flex; justify-content: center; align-items: center; margin: 0; flex-shrink: 0; }
+      .cell .bc svg { max-width: 100%; height: auto; display: block; }
+      .cell .b { margin: 4px 0 0 0; font-size: 10px; line-height: 1.25; }
       @media print { .cell { border-color: transparent; } }
     </style></head><body><div class="grid">${cells.join("")}</div>
-    <script>window.onload=function(){window.print();}</script></body></html>`);
+    <script>
+      window.onload=function(){
+        document.querySelectorAll(".grid").forEach(function(el){
+          el.style.gridTemplateColumns = "repeat(${colCount}, minmax(0, 1fr))";
+        });
+        window.print();
+      }
+    <\/script></body></html>`);
     w.document.close();
   }
 
@@ -153,12 +186,21 @@ export default function BarcodeLabelsPage() {
             <div>
               <label className="text-xs text-slate-500">Jumlah cetak</label>
               <input
-                type="number"
-                min={1}
-                max={100}
+                type="text"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
                 className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+                placeholder="1"
                 value={copies}
-                onChange={(e) => setCopies(Number(e.target.value) || 1)}
+                onChange={(e) => {
+                  const x = e.target.value.replace(/\D/g, "");
+                  setCopies(x);
+                }}
+                onBlur={() => {
+                  const n = Number.parseInt(String(copies).trim(), 10);
+                  if (!Number.isFinite(n) || n < 1) setCopies("1");
+                }}
               />
             </div>
             <button
@@ -181,7 +223,7 @@ export default function BarcodeLabelsPage() {
                   <label key={k} className="flex items-center gap-2">
                     <input
                       type="radio"
-                      name="top"
+                      name="blb-label-top"
                       checked={settings.top === k}
                       onChange={() => setSettings((s) => ({ ...s, top: k }))}
                     />
@@ -197,7 +239,7 @@ export default function BarcodeLabelsPage() {
                   <label key={k} className="flex items-center gap-2">
                     <input
                       type="radio"
-                      name="bottom"
+                      name="blb-label-bottom"
                       checked={settings.bottom === k}
                       onChange={() => setSettings((s) => ({ ...s, bottom: k }))}
                     />
@@ -213,9 +255,9 @@ export default function BarcodeLabelsPage() {
                   <label key={c} className="flex items-center gap-2">
                     <input
                       type="radio"
-                      name="cols"
-                      checked={settings.cols === c}
-                      onChange={() => setSettings((s) => ({ ...s, cols: c }))}
+                      name="blb-sheet-cols"
+                      checked={normalizeCols(settings.cols) === c}
+                      onChange={() => setSettings((s) => ({ ...s, cols: Number(c) }))}
                     />
                     {c}
                   </label>

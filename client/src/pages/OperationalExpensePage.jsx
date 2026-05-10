@@ -152,11 +152,11 @@ export default function OperationalExpensePage() {
           <div>
             <label className="text-xs text-slate-500">Biaya</label>
             <input
-              type="number"
-              min={1}
+              type="text"
+              inputMode="numeric"
               className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 14))}
               placeholder="0"
             />
           </div>

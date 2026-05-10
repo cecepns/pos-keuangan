@@ -23,7 +23,7 @@ export default function CashFlowPage() {
     defaultValues: {
       mode: "in",
       cash_account_id: "",
-      amount: 0,
+      amount: "",
       description: "",
       flow_date: new Date().toISOString().slice(0, 10),
       from_account_id: "",
@@ -71,6 +71,8 @@ export default function CashFlowPage() {
   }, [open]);
 
   async function onSubmit(v) {
+    const amtDigits = String(v.amount ?? "").replace(/\D/g, "");
+    const amountNum = amtDigits === "" ? 0 : Number(amtDigits);
     const t = toast.loading("Menyimpan...");
     try {
       if (v.mode === "transfer") {
@@ -78,7 +80,7 @@ export default function CashFlowPage() {
           type: "transfer_out",
           from_account_id: Number(v.from_account_id),
           to_account_id: Number(v.to_account_id),
-          amount: Number(v.amount),
+          amount: amountNum,
           description: v.description,
           flow_date: v.flow_date,
         });
@@ -86,7 +88,7 @@ export default function CashFlowPage() {
         const body = {
           type: v.mode,
           cash_account_id: Number(v.cash_account_id),
-          amount: Number(v.amount),
+          amount: amountNum,
           description: v.description,
           flow_date: v.flow_date,
         };
@@ -119,7 +121,7 @@ export default function CashFlowPage() {
             form.reset({
               mode: "in",
               cash_account_id: accounts[0]?.id ?? "",
-              amount: 0,
+              amount: "",
               description: "",
               flow_date: new Date().toISOString().slice(0, 10),
               from_account_id: accounts[0]?.id ?? "",
@@ -270,7 +272,15 @@ export default function CashFlowPage() {
           )}
           <div>
             <label className="text-xs text-slate-500">Jumlah</label>
-            <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("amount")} />
+            <input
+              type="text"
+              inputMode="numeric"
+              className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950"
+              value={form.watch("amount") ?? ""}
+              onChange={(e) =>
+                form.setValue("amount", e.target.value.replace(/\D/g, "").slice(0, 14), { shouldDirty: true })
+              }
+            />
           </div>
           <div>
             <label className="text-xs text-slate-500">Tanggal</label>
