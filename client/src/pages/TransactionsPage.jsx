@@ -140,7 +140,7 @@ export default function TransactionsPage() {
     <PageStack>
       <div>
         <h1 className="text-2xl font-bold">Transaksi</h1>
-        <p className="text-sm text-slate-500">Riwayat, detail &amp; refund</p>
+        <p className="text-sm text-slate-500">Riwayat, detail transaksi, dan refund</p>
       </div>
 
       <input
