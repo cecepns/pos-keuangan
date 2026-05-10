@@ -209,9 +209,21 @@ export default function ProductsPage() {
     if (!code) return toast.error("Tanpa kode barcode/SKU");
     const w = window.open("", "_blank", "width=320,height=260");
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    JsBarcode(svg, String(code), { format: "CODE128", width: 1.8, height: 52, displayValue: true, fontSize: 11 });
-    const title = name ? `<div style="font-weight:600;font-size:13px;margin-bottom:8px">${name.replace(/</g, "&lt;")}</div>` : "";
-    w.document.write(`<!DOCTYPE html><html><body style="margin:12px;text-align:center;font-family:sans-serif">${title}${svg.outerHTML}</body></html>`);
+    JsBarcode(svg, String(code), {
+      format: "CODE128",
+      width: 1.8,
+      height: 48,
+      displayValue: true,
+      fontSize: 11,
+      margin: 0,
+      textMargin: 1,
+    });
+    const title = name
+      ? `<div style="font-weight:600;font-size:13px;line-height:1.15;margin:0 0 4px 0">${name.replace(/</g, "&lt;")}</div>`
+      : "";
+    w.document.write(
+      `<!DOCTYPE html><html><body style="margin:12px;text-align:center;font-family:sans-serif;display:flex;flex-direction:column;align-items:center;gap:4px">${title}<div style="line-height:0">${svg.outerHTML}</div></body></html>`
+    );
     w.document.close();
     w.onload = () => {
       w.print();

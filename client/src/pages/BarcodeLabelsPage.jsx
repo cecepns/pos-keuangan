@@ -106,7 +106,14 @@ export default function BarcodeLabelsPage() {
     const cells = [];
     for (let i = 0; i < n; i++) {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      JsBarcode(svg, String(code), { format: "CODE128", width: 1.4, height: 44, displayValue: false });
+      JsBarcode(svg, String(code), {
+        format: "CODE128",
+        width: 1.4,
+        height: 40,
+        displayValue: false,
+        /** Default library margin 10px → jarak title/kode terasa jauh */
+        margin: 0,
+      });
       cells.push(
         `<div class="cell">
           <div class="t">${escapeHtml(top)}</div>
@@ -124,18 +131,19 @@ export default function BarcodeLabelsPage() {
       .grid { display: grid; gap: 8px 10px; padding: 12px; grid-template-columns: repeat(${colCount}, minmax(0, 1fr)); }
       .cell {
         border: 1px dashed #ccc;
-        padding: 8px 6px;
+        padding: 6px 4px;
         display: flex;
         flex-direction: column;
         align-items: center;
         text-align: center;
+        gap: 2px;
         break-inside: avoid;
         page-break-inside: avoid;
       }
-      .cell .t { font-weight: 600; line-height: 1.25; margin: 0 0 4px 0; max-width: 100%; word-break: break-word; }
-      .cell .bc { display: flex; justify-content: center; align-items: center; margin: 0; flex-shrink: 0; }
-      .cell .bc svg { max-width: 100%; height: auto; display: block; }
-      .cell .b { margin: 4px 0 0 0; font-size: 10px; line-height: 1.25; }
+      .cell .t { font-weight: 600; line-height: 1.15; margin: 0; max-width: 100%; word-break: break-word; }
+      .cell .bc { display: flex; justify-content: center; align-items: center; margin: 0; flex-shrink: 0; line-height: 0; }
+      .cell .bc svg { max-width: 100%; height: auto; display: block; vertical-align: top; }
+      .cell .b { margin: 0; font-size: 10px; line-height: 1.15; }
       @media print { .cell { border-color: transparent; } }
     </style></head><body><div class="grid">${cells.join("")}</div>
     <script>

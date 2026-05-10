@@ -403,13 +403,20 @@ export default function PosPage() {
     const labels = [];
     for (let i = 0; i < n; i++) {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      JsBarcode(svg, String(code), { format: "CODE128", width: 1.6, height: 48, displayValue: false, fontSize: 11 });
+      JsBarcode(svg, String(code), {
+        format: "CODE128",
+        width: 1.6,
+        height: 44,
+        displayValue: false,
+        fontSize: 11,
+        margin: 0,
+      });
       const bottom = String(p.barcode || p.sku || code).replace(/</g, "&lt;");
       labels.push(
-        `<div class="lb" style="page-break-after:always;text-align:center;padding:8px;font-family:sans-serif;font-size:11px;display:flex;flex-direction:column;align-items:center;">
-          <div style="font-weight:600;line-height:1.25;margin:0 0 4px 0;max-width:100%;">${String(p.name).replace(/</g, "&lt;")}</div>
-          ${svg.outerHTML}
-          <div style="margin:4px 0 0 0;font-family:monospace;font-size:10px;line-height:1.25;">${bottom}</div>
+        `<div class="lb" style="page-break-after:always;text-align:center;padding:8px;font-family:sans-serif;font-size:11px;display:flex;flex-direction:column;align-items:center;gap:2px;">
+          <div style="font-weight:600;line-height:1.15;margin:0;max-width:100%;">${String(p.name).replace(/</g, "&lt;")}</div>
+          <div style="line-height:0">${svg.outerHTML}</div>
+          <div style="margin:0;font-family:monospace;font-size:10px;line-height:1.15;">${bottom}</div>
         </div>`
       );
     }
