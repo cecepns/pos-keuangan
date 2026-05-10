@@ -38,7 +38,7 @@ npm start
 cd client
 npm install
 npm run dev
-# App: http://localhost:5173 (proxy ke /api)
+# App: http://localhost:5173 — base API dari `client/src/utils/apiBase.js` / `VITE_API_BASE_URL`
 ```
 
 ## Akun demo (password: `password`)

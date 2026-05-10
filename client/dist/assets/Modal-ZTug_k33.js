@@ -1,0 +1,6 @@
+import{d,j as e}from"./index-qJAUHMxN.js";/**
+ * @license lucide-react v0.460.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */const o=d("X",[["path",{d:"M18 6 6 18",key:"1bl5f8"}],["path",{d:"m6 6 12 12",key:"d8bk6v"}]]);function n({open:t,title:a,children:l,onClose:s,wide:r}){return t?e.jsxs("div",{className:"fixed inset-0 z-50 flex items-end justify-center sm:items-center p-0 sm:p-4",children:[e.jsx("button",{type:"button",className:"absolute inset-0 bg-slate-900/50 backdrop-blur-sm","aria-label":"Tutup",onClick:s}),e.jsxs("div",{className:`relative z-10 flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-soft dark:bg-slate-900 sm:rounded-2xl ${r?"sm:max-w-3xl":"sm:max-w-lg"}`,children:[e.jsxs("div",{className:"flex items-center justify-between border-b border-slate-100 px-5 py-4 dark:border-slate-800",children:[e.jsx("h2",{className:"text-lg font-semibold text-slate-900 dark:text-white",children:a}),e.jsx("button",{type:"button",onClick:s,className:"rounded-lg p-2 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800",children:e.jsx(o,{className:"h-5 w-5"})})]}),e.jsx("div",{className:"overflow-y-auto px-5 py-4",children:l})]})]}):null}export{n as M};
