@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Eye, ShoppingCart, Trash2, Undo2 } from "lucide-react";
+import { Banknote, Eye, Trash2, Undo2 } from "lucide-react";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatDateID, formatDateTimeID, formatIDR } from "../utils/format";
@@ -290,11 +290,11 @@ export default function TransactionsPage() {
                           <button
                             type="button"
                             className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                            title="Lanjut di POS"
-                            aria-label="Lanjut di POS"
+                            title="Lanjut bayar di POS"
+                            aria-label="Buka POS dengan keranjang terisi, siap bayar"
                             onClick={() => navigate(`/app/pos?resume=${x.id}`)}
                           >
-                            <ShoppingCart className="h-4 w-4" />
+                            <Banknote className="h-4 w-4" />
                           </button>
                           <button
                             type="button"

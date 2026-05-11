@@ -17,7 +17,7 @@ import JsBarcode from "jsbarcode";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatIDR } from "../utils/format";
+import { formatIDR, formatThousandsIdInput } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { PageStack } from "../components/TableCard";
@@ -322,7 +322,8 @@ export default function PosPage() {
         setTaxPercent(Number(data.tax_percent || 0));
         if (data.sale_date) setSaleDate(String(data.sale_date).slice(0, 10));
         setSearchParams({}, { replace: true });
-        toast.success("Draft/hold dimuat — lanjutkan transaksi");
+        toast.success("Draft/hold dimuat — silakan bayar");
+        queueMicrotask(() => setPayOpen(true));
       } catch {
         setSearchParams({}, { replace: true });
       }
@@ -361,10 +362,10 @@ export default function PosPage() {
     return Math.max(0, st - res);
   }
 
-  const cashAmt = Number.parseFloat(String(cashAmtStr).trim()) || 0;
-  const transferAmt = Number.parseFloat(String(transferAmtStr).trim()) || 0;
-  const qrisAmt = Number.parseFloat(String(qrisAmtStr).trim()) || 0;
-  const debtAmt = Number.parseFloat(String(debtAmtStr).trim()) || 0;
+  const cashAmt = Number(String(cashAmtStr).replace(/\D/g, "")) || 0;
+  const transferAmt = Number(String(transferAmtStr).replace(/\D/g, "")) || 0;
+  const qrisAmt = Number(String(qrisAmtStr).replace(/\D/g, "")) || 0;
+  const debtAmt = Number(String(debtAmtStr).replace(/\D/g, "")) || 0;
 
   const paidSumDraft = cashAmt + transferAmt + qrisAmt + debtAmt;
   const kembalianDraft = Math.max(0, paidSumDraft - grandTotal);
@@ -437,23 +438,25 @@ export default function PosPage() {
         draftResumeIdRef.current = null;
         api.delete(`/api/transactions/${rid}`, { skipToast: true }).catch(() => {});
       }
-      if (status === "completed") {
-        try {
-          localStorage.removeItem(POS_DRAFT_KEY);
-        } catch {
-          /* */
-        }
-        setCart([]);
-        setLineDraft({});
-        setDiscountTotal(0);
-        setNotes("");
-        setPayOpen(false);
-        setDebtAmtStr("");
-        setTransferAmtStr("");
-        setQrisAmtStr("");
-        setCashAmtStr("");
-        fetchProductPage(1, false).catch(() => {});
-        setProductPage(1);
+      try {
+        localStorage.removeItem(POS_DRAFT_KEY);
+      } catch {
+        /* */
+      }
+      setCart([]);
+      setLineDraft({});
+      setDiscountTotal(0);
+      setNotes("");
+      setPayOpen(false);
+      setDebtAmtStr("");
+      setTransferAmtStr("");
+      setQrisAmtStr("");
+      setCashAmtStr("");
+      fetchProductPage(1, false).catch(() => {});
+      setProductPage(1);
+      if (status === "draft" || status === "hold") {
+        setCustomerId("");
+        setSaleDate(new Date().toISOString().slice(0, 10));
       }
     } catch {
       toast.dismiss(t);
@@ -861,10 +864,14 @@ export default function PosPage() {
               Diskon total
               <input
                 type="text"
-                inputMode="decimal"
-                className="w-28 rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
-                value={discountDraft !== null ? discountDraft : String(discountTotal)}
-                onChange={(e) => setDiscountDraft(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+                inputMode="numeric"
+                className="w-32 rounded border px-2 py-1 text-right tabular-nums dark:border-slate-600 dark:bg-slate-950"
+                value={
+                  discountDraft !== null
+                    ? formatThousandsIdInput(discountDraft)
+                    : formatThousandsIdInput(String(Math.round(Number(discountTotal))))
+                }
+                onChange={(e) => setDiscountDraft(e.target.value.replace(/\D/g, "").slice(0, 14))}
                 onBlur={() => {
                   if (discountDraft === null) return;
                   setDiscountTotal(parseOptionalFloat(discountDraft, discountTotal, { min: 0, max: subtotal }));
@@ -972,8 +979,8 @@ export default function PosPage() {
               inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:border-slate-600 dark:bg-slate-950"
               placeholder="Jumlah cash (boleh lebih)"
-              value={cashAmtStr}
-              onChange={(e) => setCashAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+              value={formatThousandsIdInput(cashAmtStr)}
+              onChange={(e) => setCashAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -991,8 +998,8 @@ export default function PosPage() {
               inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Jumlah"
-              value={transferAmtStr}
-              onChange={(e) => setTransferAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+              value={formatThousandsIdInput(transferAmtStr)}
+              onChange={(e) => setTransferAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -1010,8 +1017,8 @@ export default function PosPage() {
               inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Jumlah"
-              value={qrisAmtStr}
-              onChange={(e) => setQrisAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+              value={formatThousandsIdInput(qrisAmtStr)}
+              onChange={(e) => setQrisAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
             />
           </div>
           <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
@@ -1021,8 +1028,8 @@ export default function PosPage() {
               inputMode="numeric"
               className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
               placeholder="Nominal piutang"
-              value={debtAmtStr}
-              onChange={(e) => setDebtAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
+              value={formatThousandsIdInput(debtAmtStr)}
+              onChange={(e) => setDebtAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
             />
           </div>
         </div>

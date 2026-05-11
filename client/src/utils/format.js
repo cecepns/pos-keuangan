@@ -1,3 +1,12 @@
+/** Input nominal: tampil "20.000"; simpan state sebagai digit murni ("20000"). */
+export function formatThousandsIdInput(digitsOnly) {
+  const d = String(digitsOnly ?? "").replace(/\D/g, "");
+  if (!d) return "";
+  const n = Number(d);
+  if (!Number.isFinite(n)) return "";
+  return n.toLocaleString("id-ID");
+}
+
 export function formatIDR(value) {
   const n = Number(value) || 0;
   return new Intl.NumberFormat("id-ID", {

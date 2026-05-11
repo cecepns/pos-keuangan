@@ -138,7 +138,7 @@ export function AppShell() {
       )}
 
       <div className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col lg:pl-64">
-        <header className="sticky top-0 z-20 flex h-16 min-w-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90">
+        <header className="fixed top-0 left-0 right-0 z-20 flex h-16 min-w-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-900/90 lg:left-64">
           <button
             type="button"
             className="rounded-xl p-2 text-slate-600 hover:bg-slate-100 lg:hidden dark:hover:bg-slate-800"
@@ -160,7 +160,7 @@ export function AppShell() {
             {dark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
           </button>
         </header>
-        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">
+        <main className="mt-16 min-h-0 min-w-0 flex-1 overflow-x-hidden p-4 md:p-6">
           <Outlet />
         </main>
       </div>
