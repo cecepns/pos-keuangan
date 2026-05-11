@@ -14,6 +14,7 @@ import {
   Tags,
 } from "lucide-react";
 import JsBarcode from "jsbarcode";
+import { Html5Qrcode } from "html5-qrcode";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
@@ -59,6 +60,10 @@ export default function PosPage() {
   const [qrisAmtStr, setQrisAmtStr] = useState("");
   const [qrisAcc, setQrisAcc] = useState("");
   const [barcodeOpen, setBarcodeOpen] = useState(false);
+  const [cameraScanOpen, setCameraScanOpen] = useState(false);
+  const [cameraStatus, setCameraStatus] = useState("Menyiapkan kamera...");
+  const [cameraError, setCameraError] = useState("");
+  const [cameraLastCode, setCameraLastCode] = useState("");
   const [barcodeProdId, setBarcodeProdId] = useState("");
   /** String agar bisa dikosongkan saat diketik */
   const [barcodeCopies, setBarcodeCopies] = useState("1");
@@ -67,6 +72,8 @@ export default function PosPage() {
   const [discountDraft, setDiscountDraft] = useState(null);
   const [taxDraft, setTaxDraft] = useState(null);
   const barcodeRef = useRef(null);
+  const cameraScannerRef = useRef(null);
+  const cameraBusyRef = useRef(false);
   const payModalOpenedRef = useRef(false);
   const draftResumeIdRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -518,23 +525,91 @@ export default function PosPage() {
     window.open(`https://wa.me/${wa}?text=${text}`, "_blank");
   }
 
+  const resolveScannedCode = useCallback(
+    async (rawCode) => {
+      const code = String(rawCode || "").trim();
+      if (!code) return false;
+      let found = products.find((p) => p.barcode === code);
+      if (!found) {
+        try {
+          const { data } = await api.get("/api/products", { params: { q: code, limit: PAGE_SIZE, active: 1 } });
+          found = (data.data || []).find((p) => p.barcode === code) || data.data?.[0];
+        } catch {
+          /* */
+        }
+      }
+      if (found) {
+        addToCart(found);
+        return true;
+      }
+      return false;
+    },
+    [products, addToCart]
+  );
+
   async function handleBarcode(e) {
     if (e.key !== "Enter") return;
     const code = e.target.value.trim();
     if (!code) return;
-    let found = products.find((p) => p.barcode === code);
-    if (!found) {
-      try {
-        const { data } = await api.get("/api/products", { params: { q: code, limit: PAGE_SIZE, active: 1 } });
-        found = (data.data || []).find((p) => p.barcode === code) || data.data?.[0];
-      } catch {
-        /* */
-      }
-    }
-    if (found) addToCart(found);
-    else toast.error("Produk tidak ditemukan");
+    const ok = await resolveScannedCode(code);
+    if (!ok) toast.error("Produk tidak ditemukan");
     e.target.value = "";
   }
+
+  useEffect(() => {
+    if (!cameraScanOpen) return;
+    let closed = false;
+
+    (async () => {
+      try {
+        setCameraError("");
+        setCameraStatus("Meminta akses kamera...");
+        const scanner = new Html5Qrcode("pos-camera-scan-region", { verbose: false });
+        cameraScannerRef.current = scanner;
+        await scanner.start(
+          { facingMode: "environment" },
+          {
+            fps: 10,
+            qrbox: { width: 280, height: 140 },
+            disableFlip: true,
+            rememberLastUsedCamera: true,
+          },
+          async (decodedText) => {
+            if (cameraBusyRef.current || closed) return;
+            cameraBusyRef.current = true;
+            setCameraLastCode(decodedText);
+            const ok = await resolveScannedCode(decodedText);
+            if (!ok) toast.error(`Barcode tidak ditemukan: ${decodedText}`);
+            if (navigator.vibrate) navigator.vibrate(60);
+            setTimeout(() => {
+              cameraBusyRef.current = false;
+            }, 900);
+          },
+          () => {}
+        );
+        if (!closed) setCameraStatus("Kamera aktif — arahkan barcode ke kotak scan.");
+      } catch {
+        if (!closed) {
+          setCameraError("Gagal mengaktifkan kamera. Pastikan izin kamera diizinkan dan akses lewat HTTPS.");
+          setCameraStatus("");
+        }
+      }
+    })();
+
+    return () => {
+      closed = true;
+      cameraBusyRef.current = false;
+      const scanner = cameraScannerRef.current;
+      cameraScannerRef.current = null;
+      if (!scanner) return;
+      scanner
+        .stop()
+        .catch(() => {})
+        .finally(() => {
+          scanner.clear().catch(() => {});
+        });
+    };
+  }, [cameraScanOpen, resolveScannedCode]);
 
   function printBarcodeLabels() {
     const p = products.find((x) => String(x.id) === String(barcodeProdId));
@@ -634,6 +709,17 @@ export default function PosPage() {
               placeholder="Scan barcode (Enter)"
               onKeyDown={handleBarcode}
             />
+            <button
+              type="button"
+              onClick={() => {
+                setCameraLastCode("");
+                setCameraError("");
+                setCameraScanOpen(true);
+              }}
+              className="rounded-lg border border-brand-300 bg-white px-2 py-1 text-xs font-semibold text-brand-700 dark:border-brand-700 dark:bg-slate-900 dark:text-brand-300"
+            >
+              Kamera HP
+            </button>
           </div>
           </div>
           <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-2xl border border-slate-100 dark:border-slate-800">
@@ -1122,6 +1208,33 @@ export default function PosPage() {
           <button type="button" className="rounded-xl bg-brand-600 px-6 py-2 font-semibold text-white" onClick={() => submitSale("completed")}>
             Selesaikan
           </button>
+        </div>
+      </Modal>
+
+      <Modal
+        open={cameraScanOpen}
+        title="Scan Barcode via Kamera"
+        onClose={() => {
+          setCameraScanOpen(false);
+          setCameraStatus("");
+        }}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Gunakan kamera belakang HP untuk scan barcode produk. Produk otomatis masuk keranjang saat barcode terbaca.
+          </p>
+          <div id="pos-camera-scan-region" className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-700" />
+          {cameraStatus ? <p className="text-xs text-slate-500">{cameraStatus}</p> : null}
+          {cameraError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+              {cameraError}
+            </div>
+          ) : null}
+          {cameraLastCode ? (
+            <p className="text-xs text-emerald-700 dark:text-emerald-300">
+              Scan terakhir: <span className="font-semibold">{cameraLastCode}</span>
+            </p>
+          ) : null}
         </div>
       </Modal>
 
