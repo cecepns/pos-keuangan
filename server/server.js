@@ -19,6 +19,18 @@ const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
+/** Hapus file gambar produk di disk (path DB seperti /uploads/namafile.jpg) */
+function unlinkProductImageFile(imagePathRel) {
+  if (!imagePathRel || typeof imagePathRel !== "string") return;
+  const rel = imagePathRel.trim();
+  if (!rel.startsWith("/uploads/")) return;
+  const base = path.basename(rel);
+  if (!base || base.includes("..") || base.includes("/") || base.includes("\\")) return;
+  const abs = path.resolve(UPLOAD_DIR, base);
+  if (!abs.startsWith(path.resolve(UPLOAD_DIR))) return;
+  fs.unlink(abs, () => {});
+}
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || "127.0.0.1",
   port: Number(process.env.DB_PORT || 3306),
@@ -682,7 +694,25 @@ app.delete(
   requireAuth,
   requireRoles("admin"),
   asyncHandler(async (req, res) => {
+    const [rows] = await pool.query(`SELECT image_path FROM products WHERE id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Produk tidak ada" });
+    const prev = rows[0].image_path;
     await pool.query(`DELETE FROM products WHERE id=?`, [req.params.id]);
+    unlinkProductImageFile(prev);
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  "/api/products/:id/image",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const [rows] = await pool.query(`SELECT image_path FROM products WHERE id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Produk tidak ada" });
+    const prev = rows[0].image_path;
+    await pool.query(`UPDATE products SET image_path=NULL WHERE id=?`, [req.params.id]);
+    unlinkProductImageFile(prev);
     res.json({ ok: true });
   })
 );
@@ -694,8 +724,12 @@ app.post(
   upload.single("image"),
   asyncHandler(async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "File wajib" });
+    const [rows] = await pool.query(`SELECT image_path FROM products WHERE id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Produk tidak ada" });
+    const prev = rows[0].image_path;
     const rel = `/uploads/${req.file.filename}`;
     await pool.query(`UPDATE products SET image_path=? WHERE id=?`, [rel, req.params.id]);
+    unlinkProductImageFile(prev);
     res.json({ path: rel });
   })
 );
