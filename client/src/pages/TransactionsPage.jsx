@@ -20,6 +20,12 @@ function hasOutstandingReceivable(tx) {
   return Number(tx?.receivable_balance || 0) > RECEIVABLE_EPSILON;
 }
 
+function paymentMethodLabel(payment, tx) {
+  if (payment?.method !== "hutang") return PAY_LABEL[payment?.method] || payment?.method;
+  // "hutang" di payment transaksi berarti piutang yang dicatat saat transaksi awal.
+  return hasOutstandingReceivable(tx) ? "Piutang tercatat" : "Piutang tercatat (sudah lunas)";
+}
+
 function receiptDateStr(tx) {
   if (!tx) return "";
   if (tx.sale_date) {
@@ -555,10 +561,16 @@ export default function TransactionsPage() {
                 <p className="text-xs font-semibold uppercase text-slate-500">Pembayaran</p>
                 {(detail.payments || []).map((p) => (
                   <div key={p.id} className="flex justify-end gap-4">
-                    <span>{PAY_LABEL[p.method] || p.method}</span>
+                    <span>{paymentMethodLabel(p, detail)}</span>
                     <span>{formatIDR(p.amount)}</span>
                   </div>
                 ))}
+                {Number(detail.receivable_paid_amount) > RECEIVABLE_EPSILON && (
+                  <div className="flex justify-end gap-4 text-emerald-700 dark:text-emerald-300">
+                    <span>Pelunasan piutang</span>
+                    <span>{formatIDR(detail.receivable_paid_amount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-end gap-4 pt-1 font-medium">
                   <span>Dibayar</span>
                   <span>{formatIDR(detail.paid_amount)}</span>
