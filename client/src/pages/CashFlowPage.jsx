@@ -4,7 +4,7 @@ import toast from "react-hot-toast";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatDateID, formatIDR } from "../utils/format";
+import { formatDateID, formatIDR, formatThousandsIdInput } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
@@ -28,10 +28,25 @@ export default function CashFlowPage() {
       flow_date: new Date().toISOString().slice(0, 10),
       from_account_id: "",
       to_account_id: "",
+      cash_account_id_override: "",
+      from_account_id_override: "",
+      to_account_id_override: "",
       income_category_id: "",
       expense_category_id: "",
     },
   });
+
+  function resolveCashAccountId(v, fieldSelect, fieldOverride) {
+    const raw = String(v[fieldOverride] ?? "").replace(/\D/g, "");
+    if (raw) {
+      const id = Number(raw);
+      if (!accounts.some((a) => Number(a.id) === id)) return { error: "ID rekening kas tidak ada di daftar" };
+      return { id };
+    }
+    const sid = Number(v[fieldSelect]);
+    if (!Number.isFinite(sid) || sid <= 0) return { error: "Pilih atau isi ID rekening kas" };
+    return { id: sid };
+  }
 
   const loadFlows = useCallback(async () => {
     const { data } = await api.get("/api/cash-flows", {
@@ -76,18 +91,41 @@ export default function CashFlowPage() {
     const t = toast.loading("Menyimpan...");
     try {
       if (v.mode === "transfer") {
+        const fromR = resolveCashAccountId(v, "from_account_id", "from_account_id_override");
+        if (fromR.error) {
+          toast.dismiss(t);
+          toast.error(fromR.error);
+          return;
+        }
+        const toR = resolveCashAccountId(v, "to_account_id", "to_account_id_override");
+        if (toR.error) {
+          toast.dismiss(t);
+          toast.error(toR.error);
+          return;
+        }
+        if (fromR.id === toR.id) {
+          toast.dismiss(t);
+          toast.error("Rekening asal dan tujuan harus berbeda");
+          return;
+        }
         await api.post("/api/cash-flows", {
           type: "transfer_out",
-          from_account_id: Number(v.from_account_id),
-          to_account_id: Number(v.to_account_id),
+          from_account_id: fromR.id,
+          to_account_id: toR.id,
           amount: amountNum,
           description: v.description,
           flow_date: v.flow_date,
         });
       } else {
+        const accR = resolveCashAccountId(v, "cash_account_id", "cash_account_id_override");
+        if (accR.error) {
+          toast.dismiss(t);
+          toast.error(accR.error);
+          return;
+        }
         const body = {
           type: v.mode,
-          cash_account_id: Number(v.cash_account_id),
+          cash_account_id: accR.id,
           amount: amountNum,
           description: v.description,
           flow_date: v.flow_date,
@@ -121,11 +159,14 @@ export default function CashFlowPage() {
             form.reset({
               mode: "in",
               cash_account_id: accounts[0]?.id ?? "",
+              cash_account_id_override: "",
               amount: "",
               description: "",
               flow_date: new Date().toISOString().slice(0, 10),
               from_account_id: accounts[0]?.id ?? "",
               to_account_id: accounts[1]?.id ?? accounts[0]?.id ?? "",
+              from_account_id_override: "",
+              to_account_id_override: "",
               income_category_id: "",
               expense_category_id: "",
             });
@@ -218,6 +259,17 @@ export default function CashFlowPage() {
                     </option>
                   ))}
                 </select>
+                <label className="mt-2 block text-xs text-slate-500">Atau ketik ID akun (mengganti pilihan)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="ID"
+                  className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950"
+                  value={formatThousandsIdInput(form.watch("from_account_id_override"))}
+                  onChange={(e) =>
+                    form.setValue("from_account_id_override", e.target.value.replace(/\D/g, "").slice(0, 10), { shouldDirty: true })
+                  }
+                />
               </div>
               <div>
                 <label className="text-xs text-slate-500">Ke</label>
@@ -228,6 +280,17 @@ export default function CashFlowPage() {
                     </option>
                   ))}
                 </select>
+                <label className="mt-2 block text-xs text-slate-500">Atau ketik ID akun (mengganti pilihan)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="ID"
+                  className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950"
+                  value={formatThousandsIdInput(form.watch("to_account_id_override"))}
+                  onChange={(e) =>
+                    form.setValue("to_account_id_override", e.target.value.replace(/\D/g, "").slice(0, 10), { shouldDirty: true })
+                  }
+                />
               </div>
             </>
           ) : (
@@ -241,6 +304,17 @@ export default function CashFlowPage() {
                     </option>
                   ))}
                 </select>
+                <label className="mt-2 block text-xs text-slate-500">Atau ketik ID akun (mengganti pilihan)</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="ID"
+                  className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950"
+                  value={formatThousandsIdInput(form.watch("cash_account_id_override"))}
+                  onChange={(e) =>
+                    form.setValue("cash_account_id_override", e.target.value.replace(/\D/g, "").slice(0, 10), { shouldDirty: true })
+                  }
+                />
               </div>
               {form.watch("mode") === "in" && (
                 <div className="md:col-span-2">

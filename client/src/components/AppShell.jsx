@@ -24,6 +24,7 @@ import {
   Sun,
   Leaf,
 } from "lucide-react";
+import api from "../api/client";
 import { useAuthStore, roleLabel } from "../store/authStore";
 import { useThemeStore } from "../store/themeStore";
 import toast from "react-hot-toast";
@@ -63,6 +64,7 @@ export function AppShell() {
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [storeName, setStoreName] = useState("");
   const dark = useThemeStore((s) => s.dark);
   const toggleTheme = useThemeStore((s) => s.toggle);
   const initTheme = useThemeStore((s) => s.init);
@@ -71,7 +73,19 @@ export function AppShell() {
     initTheme();
   }, [initTheme]);
 
+  useEffect(() => {
+    if (!user) return;
+    api
+      .get("/api/settings", { skipToast: true })
+      .then(({ data }) => {
+        const n = String(data?.store_name ?? "").trim();
+        setStoreName(n);
+      })
+      .catch(() => setStoreName(""));
+  }, [user]);
+
   const filtered = nav.filter((n) => canAccessNavItem(user, n));
+  const sidebarTitle = storeName || "POS Keuangan";
 
   function handleLogout() {
     logout();
@@ -99,9 +113,10 @@ export function AppShell() {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white">
             <Leaf className="h-6 w-6" />
           </div>
-          <div>
-            <div className="font-semibold text-slate-900 dark:text-white">POS Keuangan</div>
-            <div className="text-xs text-slate-500">Retail Tanaman</div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-semibold leading-tight text-slate-900 dark:text-white" title={sidebarTitle}>
+              {sidebarTitle}
+            </div>
           </div>
         </div>
         <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">

@@ -57,7 +57,6 @@ export default function PosPage() {
   const [transferAcc, setTransferAcc] = useState("");
   const [qrisAmtStr, setQrisAmtStr] = useState("");
   const [qrisAcc, setQrisAcc] = useState("");
-  const [debtAmtStr, setDebtAmtStr] = useState("");
   const [barcodeOpen, setBarcodeOpen] = useState(false);
   const [barcodeProdId, setBarcodeProdId] = useState("");
   /** String agar bisa dikosongkan saat diketik */
@@ -232,7 +231,6 @@ export default function PosPage() {
       setCashAmtStr("");
       setTransferAmtStr("");
       setQrisAmtStr("");
-      setDebtAmtStr("");
     }
     if (!payOpen) payModalOpenedRef.current = false;
   }, [payOpen]);
@@ -365,9 +363,9 @@ export default function PosPage() {
   const cashAmt = Number(String(cashAmtStr).replace(/\D/g, "")) || 0;
   const transferAmt = Number(String(transferAmtStr).replace(/\D/g, "")) || 0;
   const qrisAmt = Number(String(qrisAmtStr).replace(/\D/g, "")) || 0;
-  const debtAmt = Number(String(debtAmtStr).replace(/\D/g, "")) || 0;
-
-  const paidSumDraft = cashAmt + transferAmt + qrisAmt + debtAmt;
+  const nonDebtPaid = cashAmt + transferAmt + qrisAmt;
+  const hutangGap = Math.max(0, Math.round((grandTotal - nonDebtPaid) * 100) / 100);
+  const paidSumDraft = nonDebtPaid + hutangGap;
   const kembalianDraft = Math.max(0, paidSumDraft - grandTotal);
 
   function buildPayments() {
@@ -376,7 +374,7 @@ export default function PosPage() {
       pays.push({ method: "cash", amount: cashAmt, cash_account_id: Number(cashAccountId) });
     if (transferAmt > 0 && transferAcc) pays.push({ method: "transfer", amount: transferAmt, cash_account_id: Number(transferAcc) });
     if (qrisAmt > 0 && qrisAcc) pays.push({ method: "qris", amount: qrisAmt, cash_account_id: Number(qrisAcc) });
-    if (debtAmt > 0) pays.push({ method: "hutang", amount: debtAmt });
+    if (hutangGap > 0.02) pays.push({ method: "hutang", amount: hutangGap });
     return pays;
   }
 
@@ -385,7 +383,7 @@ export default function PosPage() {
     if (cashAmt > 0) p.push({ method: "cash", amount: cashAmt });
     if (transferAmt > 0) p.push({ method: "transfer", amount: transferAmt });
     if (qrisAmt > 0) p.push({ method: "qris", amount: qrisAmt });
-    if (debtAmt > 0) p.push({ method: "piutang", amount: debtAmt });
+    if (hutangGap > 0.02) p.push({ method: "piutang", amount: hutangGap });
     return p;
   }
 
@@ -409,8 +407,8 @@ export default function PosPage() {
         toast.error("Total pembayaran kurang dari grand total");
         return;
       }
-      if (debtAmt > 0 && !customerId) {
-        toast.error("Pilih pelanggan untuk piutang (sisa pembayaran)");
+      if (hutangGap > 0.02 && !customerId) {
+        toast.error("Pilih pelanggan agar sisa (grand total − tunai/transfer/QRIS) bisa dicatat sebagai piutang");
         return;
       }
     }
@@ -448,7 +446,6 @@ export default function PosPage() {
       setDiscountTotal(0);
       setNotes("");
       setPayOpen(false);
-      setDebtAmtStr("");
       setTransferAmtStr("");
       setQrisAmtStr("");
       setCashAmtStr("");
@@ -952,7 +949,17 @@ export default function PosPage() {
             <span>{formatIDR(grandTotal)}</span>
           </div>
           <div className="mt-1 flex justify-between text-slate-600 dark:text-slate-400">
-            <span>Jumlah dibayar (total input)</span>
+            <span>Tunai + transfer + QRIS</span>
+            <span>{formatIDR(nonDebtPaid)}</span>
+          </div>
+          {hutangGap > 0.02 && (
+            <div className="mt-1 flex justify-between text-slate-600 dark:text-slate-400">
+              <span>Piutang (sisa otomatis)</span>
+              <span>{formatIDR(hutangGap)}</span>
+            </div>
+          )}
+          <div className="mt-1 flex justify-between font-semibold text-slate-800 dark:text-slate-200">
+            <span>Total alokasi</span>
             <span>{formatIDR(paidSumDraft)}</span>
           </div>
           <div className="mt-2 flex justify-between text-lg font-bold text-brand-800 dark:text-brand-300">
@@ -1021,16 +1028,23 @@ export default function PosPage() {
               onChange={(e) => setQrisAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
             />
           </div>
-          <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
-            <p className="text-sm font-medium">Piutang (belum dibayar penuh)</p>
-            <input
-              type="text"
-              inputMode="numeric"
-              className="w-full rounded-lg border px-2 py-2 dark:bg-slate-950"
-              placeholder="Nominal piutang"
-              value={formatThousandsIdInput(debtAmtStr)}
-              onChange={(e) => setDebtAmtStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
-            />
+          <div className="space-y-2 rounded-xl bg-slate-50 p-3 dark:bg-slate-800 md:col-span-2">
+            <p className="text-sm font-medium">Piutang (sisa ke grand total)</p>
+            <p className="text-xs text-slate-600 dark:text-slate-400">
+              Nominal di atas belum menutup total? Sisanya otomatis jadi piutang — pilih pelanggan dulu.
+            </p>
+            {hutangGap > 0.02 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/90 px-3 py-2 text-sm font-semibold text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+                Sisa piutang: {formatIDR(hutangGap)}
+                {!customerId && (
+                  <span className="mt-1 block text-xs font-normal text-red-600 dark:text-red-400">
+                    Pilih pelanggan di keranjang agar transaksi bisa diselesaikan.
+                  </span>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Tidak ada sisa piutang (atau grand total sudah tertutup).</p>
+            )}
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
@@ -1046,7 +1060,6 @@ export default function PosPage() {
             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
             onClick={() => {
               setCashAmtStr("");
-              setDebtAmtStr("");
               setTransferAmtStr(String(Math.max(0, Math.round(grandTotal))));
               if (!transferAcc && cashAccounts[0]) setTransferAcc(String(cashAccounts[0].id));
             }}
@@ -1058,7 +1071,6 @@ export default function PosPage() {
             className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
             onClick={() => {
               setCashAmtStr("");
-              setDebtAmtStr("");
               setTransferAmtStr("");
               setQrisAmtStr(String(Math.max(0, Math.round(grandTotal))));
               if (!qrisAcc && cashAccounts[0]) setQrisAcc(String(cashAccounts[0].id));
@@ -1073,10 +1085,9 @@ export default function PosPage() {
               setCashAmtStr("");
               setTransferAmtStr("");
               setQrisAmtStr("");
-              setDebtAmtStr(String(Math.max(0, Math.round(grandTotal))));
             }}
           >
-            Piutang saja = total
+            Piutang saja (kosongkan tunai/transfer/QRIS)
           </button>
           <button
             type="button"
@@ -1085,7 +1096,6 @@ export default function PosPage() {
               setCashAmtStr("");
               setTransferAmtStr("");
               setQrisAmtStr("");
-              setDebtAmtStr("");
             }}
           >
             Kosongkan nominal

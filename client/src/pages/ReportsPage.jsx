@@ -6,7 +6,7 @@ import * as XLSX from "xlsx";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatIDR } from "../utils/format";
+import { formatIDR, formatReportDateCell } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { PAGE_TABLE, PageStackLoose, REPORT_TABLE_SCROLL, REPORT_TABLE_SCROLL_TALL } from "../components/TableCard";
 
@@ -155,7 +155,11 @@ export default function ReportsPage() {
         <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900 print:break-inside-avoid">
           <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-white">Laporan laba rugi</h2>
           <p className="mb-4 text-xs text-slate-500">
-            Periode {pl.from === pl.to ? pl.from : `${pl.from} s/d ${pl.to}`} — penjualan dari tanggal transaksi POS; pengeluaran dari tanggal aliran kas.
+            Periode{" "}
+            {pl.from === pl.to
+              ? formatReportDateCell(pl.from)
+              : `${formatReportDateCell(pl.from)} s/d ${formatReportDateCell(pl.to)}`}{" "}
+            — penjualan dari tanggal transaksi POS; pengeluaran dari tanggal aliran kas.
           </p>
           <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
@@ -179,8 +183,8 @@ export default function ReportsPage() {
               <p className="mt-1 text-sm font-bold tabular-nums text-brand-800 dark:text-brand-200">{formatIDR(pl.summary.net_profit)}</p>
             </div>
           </div>
-          <div className="grid gap-6 lg:grid-cols-2">
-            <div>
+          <div className="grid min-w-0 gap-6 lg:grid-cols-2">
+            <div className="min-w-0">
               <h3 className="mb-2 font-semibold">Ringkasan</h3>
               <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
                 <li>Laba kotor (total_profit trx): {formatIDR(pl.summary.gross_profit)}</li>
@@ -193,7 +197,7 @@ export default function ReportsPage() {
                 )}
               </ul>
             </div>
-            <div>
+            <div className="min-w-0">
               <h3 className="mb-2 font-semibold">Pengeluaran per kategori</h3>
               <p className="mb-2 text-xs text-slate-500">
                 Total nominal per tipe: {formatIDR(pl.summary?.expense_by_category_total ?? 0)} · Grand total biaya operasional periode:{" "}
@@ -252,7 +256,7 @@ export default function ReportsPage() {
               <tbody>
                 {sales.map((r) => (
                   <tr key={r.d} className="border-b border-slate-50 dark:border-slate-800">
-                    <td className="py-2">{r.d}</td>
+                    <td className="py-2 whitespace-nowrap">{formatReportDateCell(r.d)}</td>
                     <td className="py-2 text-right">{formatIDR(r.omzet)}</td>
                     <td className="py-2 text-right">{formatIDR(r.profit)}</td>
                   </tr>

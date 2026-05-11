@@ -29,6 +29,17 @@ export function formatDateID(dateStr, opts = {}) {
   }).format(d);
 }
 
+/** Tanggal dari API (ISO / Date / YYYY-MM-DD) untuk sel laporan */
+export function formatReportDateCell(value) {
+  if (value == null || value === "") return "—";
+  const s = String(value);
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return formatDateID(m[1]);
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return s;
+  return formatDateID(d.toISOString().slice(0, 10));
+}
+
 export function formatDateTimeID(dateStr) {
   if (!dateStr) return "—";
   const d = new Date(dateStr);

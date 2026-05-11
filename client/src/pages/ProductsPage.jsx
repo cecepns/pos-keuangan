@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useForm, Controller } from "react-hook-form";
 import toast from "react-hot-toast";
-import { Plus, Pencil, Trash2, ScanBarcode, AlertTriangle } from "lucide-react";
+import { Plus, Pencil, Trash2, ScanBarcode, AlertTriangle, ImageOff } from "lucide-react";
 import Select from "react-select";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
@@ -72,6 +72,7 @@ export default function ProductsPage() {
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(null);
   const [delId, setDelId] = useState(null);
+  const [removeImgId, setRemoveImgId] = useState(null);
   const [categories, setCategories] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [lowStockOnly, setLowStockOnly] = useState(false);
@@ -92,6 +93,7 @@ export default function ProductsPage() {
       supplier_id: "",
       category_ids: [],
       is_active: true,
+      image_path: "",
     },
   });
 
@@ -151,6 +153,7 @@ export default function ProductsPage() {
       supplier_id: "",
       category_ids: [],
       is_active: true,
+      image_path: "",
     });
     setModal("edit");
   }
@@ -205,9 +208,25 @@ export default function ProductsPage() {
   async function uploadImage(id, file) {
     const fd = new FormData();
     fd.append("image", file);
-    await api.post(`/api/products/${id}/image`, fd, { headers: { "Content-Type": "multipart/form-data" } });
+    const { data } = await api.post(`/api/products/${id}/image`, fd, { headers: { "Content-Type": "multipart/form-data" } });
     toast.success("Gambar diunggah");
     load();
+    if (String(form.watch("id")) === String(id) && data?.path) form.setValue("image_path", data.path);
+  }
+
+  async function confirmRemoveImage() {
+    if (!removeImgId) return;
+    const t = toast.loading("Menghapus gambar...");
+    try {
+      await api.delete(`/api/products/${removeImgId}/image`);
+      toast.success("Gambar dihapus", { id: t });
+      if (String(form.watch("id")) === String(removeImgId)) form.setValue("image_path", "");
+      setRemoveImgId(null);
+      load();
+    } catch {
+      toast.dismiss(t);
+      setRemoveImgId(null);
+    }
   }
 
   function printBarcode(product) {
@@ -334,16 +353,26 @@ export default function ProductsPage() {
                   </td>
                   <td className="px-4 py-3">
                     {p.image_path ? (
-                      <img
-                        src={uploadSrc(p.image_path)}
-                        alt=""
-                        className="h-12 w-12 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        onError={(e) => {
-                          e.target.style.display = "none";
-                        }}
-                      />
+                      <div className="relative inline-flex">
+                        <img
+                          src={uploadSrc(p.image_path)}
+                          alt=""
+                          className="h-12 w-12 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
+                          loading="lazy"
+                          referrerPolicy="no-referrer"
+                          onError={(e) => {
+                            e.target.style.display = "none";
+                          }}
+                        />
+                        <button
+                          type="button"
+                          title="Hapus gambar"
+                          className="absolute -right-1 -top-1 rounded-full bg-red-600 p-1 text-white shadow hover:bg-red-700"
+                          onClick={() => setRemoveImgId(p.id)}
+                        >
+                          <ImageOff className="h-3 w-3" />
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400">—</span>
                     )}
@@ -462,6 +491,22 @@ export default function ProductsPage() {
             <label className="text-xs text-slate-500">Deskripsi</label>
             <textarea className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" rows={3} {...form.register("description")} />
           </div>
+          {form.watch("id") && form.watch("image_path") ? (
+            <div className="md:col-span-2 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 p-3 dark:border-slate-800">
+              <img
+                src={uploadSrc(form.watch("image_path"))}
+                alt=""
+                className="h-20 w-20 rounded-lg border object-cover"
+              />
+              <button
+                type="button"
+                className="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-600 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950/30"
+                onClick={() => setRemoveImgId(form.watch("id"))}
+              >
+                Hapus gambar
+              </button>
+            </div>
+          ) : null}
           <label className="flex items-center gap-2 md:col-span-2">
             <input type="checkbox" checked={!!form.watch("is_active")} onChange={(e) => form.setValue("is_active", e.target.checked)} />
             Aktif
@@ -488,6 +533,16 @@ export default function ProductsPage() {
           load();
         }}
         onClose={() => setDelId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!removeImgId}
+        title="Hapus gambar produk?"
+        message="File gambar di server akan dihapus dari disk."
+        danger
+        confirmText="Hapus"
+        onConfirm={confirmRemoveImage}
+        onClose={() => setRemoveImgId(null)}
       />
 
     </PageStack>
