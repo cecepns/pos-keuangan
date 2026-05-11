@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
@@ -10,7 +11,7 @@ import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { Modal } from "../components/Modal";
 
-const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Hutang" };
+const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Piutang" };
 
 function receiptDateStr(tx) {
   if (!tx) return "";
@@ -23,6 +24,7 @@ function receiptDateStr(tx) {
 }
 
 export default function TransactionsPage() {
+  const navigate = useNavigate();
   const [list, setList] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -30,11 +32,13 @@ export default function TransactionsPage() {
   const dq = useDebouncedValue(q, 350);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [refundId, setRefundId] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [deleteDraftId, setDeleteDraftId] = useState(null);
 
   async function load() {
     setLoading(true);
@@ -42,6 +46,7 @@ export default function TransactionsPage() {
       const params = { q: dq, page, limit: PAGE_SIZE };
       if (from) params.from = from;
       if (to) params.to = to;
+      if (statusFilter) params.status = statusFilter;
       const { data } = await api.get("/api/transactions", { params });
       setList(data.data || []);
       setTotal(data.total || 0);
@@ -52,7 +57,20 @@ export default function TransactionsPage() {
 
   useEffect(() => {
     load();
-  }, [dq, page, from, to]);
+  }, [dq, page, from, to, statusFilter]);
+
+  async function deleteDraftHold() {
+    if (!deleteDraftId) return;
+    const t = toast.loading("Menghapus...");
+    try {
+      await api.delete(`/api/transactions/${deleteDraftId}`);
+      toast.success("Dihapus", { id: t });
+      setDeleteDraftId(null);
+      load();
+    } catch {
+      toast.dismiss(t);
+    }
+  }
 
   function displayTxDate(x) {
     if (x.sale_date) return formatDateID(x.sale_date);
@@ -199,6 +217,23 @@ export default function TransactionsPage() {
           >
             Reset tanggal
           </button>
+          <div>
+            <label className="text-xs text-slate-500">Status</label>
+            <select
+              className="mt-1 block rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              value={statusFilter}
+              onChange={(e) => {
+                setPage(1);
+                setStatusFilter(e.target.value);
+              }}
+            >
+              <option value="">Semua</option>
+              <option value="completed">Selesai</option>
+              <option value="draft">Draft</option>
+              <option value="hold">Hold</option>
+              <option value="refunded">Refund</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -236,6 +271,20 @@ export default function TransactionsPage() {
                         <button type="button" className="text-xs font-semibold text-red-600 hover:underline" onClick={() => setRefundId(x.id)}>
                           Refund
                         </button>
+                      )}
+                      {(x.status === "draft" || x.status === "hold") && (
+                        <>
+                          <button
+                            type="button"
+                            className="text-xs font-semibold text-emerald-600 hover:underline"
+                            onClick={() => navigate(`/app/pos?resume=${x.id}`)}
+                          >
+                            Lanjut di POS
+                          </button>
+                          <button type="button" className="text-xs font-semibold text-slate-500 hover:underline" onClick={() => setDeleteDraftId(x.id)}>
+                            Hapus
+                          </button>
+                        </>
                       )}
                     </div>
                   </td>
@@ -375,6 +424,16 @@ export default function TransactionsPage() {
         confirmText="Refund"
         onConfirm={doRefund}
         onClose={() => setRefundId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deleteDraftId}
+        title="Hapus draft / hold?"
+        message="Keranjang tersimpan di server akan dihapus permanen."
+        danger
+        confirmText="Hapus"
+        onConfirm={deleteDraftHold}
+        onClose={() => setDeleteDraftId(null)}
       />
     </PageStack>
   );

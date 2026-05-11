@@ -76,13 +76,24 @@ function generateInvoiceNo() {
   return `INV${y}${m}${day}${rnd}`;
 }
 
+async function getPermissionsForRole(roleId) {
+  const [rows] = await pool.query(
+    `SELECT p.code FROM role_permissions rp INNER JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ?`,
+    [roleId]
+  );
+  return rows.map((r) => r.code);
+}
+
 async function getUserWithRole(userId) {
   const [rows] = await pool.query(
     `SELECT u.id, u.name, u.email, u.role_id, u.store_id, r.name AS role_name
      FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ? AND u.is_active = 1`,
     [userId]
   );
-  return rows[0] || null;
+  const u = rows[0];
+  if (!u) return null;
+  u.permissions = await getPermissionsForRole(u.role_id);
+  return u;
 }
 
 function signToken(user) {
@@ -160,6 +171,7 @@ app.post(
     await pool.query(`UPDATE users SET last_login_at = NOW() WHERE id = ?`, [user.id]);
     const token = signToken(user);
     delete user.password_hash;
+    user.permissions = await getPermissionsForRole(user.role_id);
     res.json({ token, user });
   })
 );
@@ -213,6 +225,82 @@ app.post(
       hash,
     ]);
     res.status(201).json({ id: r.insertId });
+  })
+);
+
+app.put(
+  "/api/users/:id",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const { name, email, role_id, store_id, is_active, password } = req.body;
+    if (!name || !email || !role_id) return res.status(400).json({ error: "Nama, email, dan role wajib" });
+    const fields = [`name=?`, `email=?`, `role_id=?`, `store_id=?`, `is_active=?`];
+    const vals = [name, String(email).toLowerCase(), role_id, store_id || null, is_active === false ? 0 : 1];
+    if (password && String(password).length >= 4) {
+      fields.push(`password_hash=?`);
+      vals.push(await bcrypt.hash(String(password), 10));
+    }
+    vals.push(id);
+    await pool.query(`UPDATE users SET ${fields.join(", ")} WHERE id=?`, vals);
+    res.json({ ok: true });
+  })
+);
+
+app.get(
+  "/api/permissions",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (_req, res) => {
+    const [rows] = await pool.query(`SELECT id, code, description FROM permissions ORDER BY code`);
+    res.json({ data: rows });
+  })
+);
+
+app.get(
+  "/api/roles/:id/permissions",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    const roleId = Number(req.params.id);
+    const [rows] = await pool.query(
+      `SELECT p.id, p.code, p.description FROM role_permissions rp
+       INNER JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ? ORDER BY p.code`,
+      [roleId]
+    );
+    res.json({ data: rows });
+  })
+);
+
+app.put(
+  "/api/roles/:id/permissions",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    const roleId = Number(req.params.id);
+    const codes = Array.isArray(req.body.codes) ? req.body.codes.map(String) : [];
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      if (roleId === 1) {
+        await conn.query(`DELETE FROM role_permissions WHERE role_id=?`, [roleId]);
+        await conn.query(`INSERT INTO role_permissions (role_id, permission_id) SELECT 1, id FROM permissions WHERE code='all'`);
+      } else {
+        await conn.query(`DELETE FROM role_permissions WHERE role_id=?`, [roleId]);
+        for (const code of codes) {
+          const [p] = await conn.query(`SELECT id FROM permissions WHERE code=? LIMIT 1`, [code]);
+          if (p.length) await conn.query(`INSERT IGNORE INTO role_permissions (role_id, permission_id) VALUES (?,?)`, [roleId, p[0].id]);
+        }
+      }
+      await conn.commit();
+      res.json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message });
+    } finally {
+      conn.release();
+    }
   })
 );
 
@@ -424,6 +512,42 @@ app.get(
   })
 );
 
+app.post(
+  "/api/expense-categories",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nama kategori wajib" });
+    const type = String(req.body.type || "operational").trim() || "operational";
+    const [r] = await pool.query(`INSERT INTO expense_categories (name, type) VALUES (?,?)`, [name, type]);
+    res.status(201).json({ id: r.insertId });
+  })
+);
+
+app.put(
+  "/api/expense-categories/:id",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nama wajib" });
+    const type = String(req.body.type || "operational").trim() || "operational";
+    await pool.query(`UPDATE expense_categories SET name=?, type=? WHERE id=?`, [name, type, req.params.id]);
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  "/api/expense-categories/:id",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    await pool.query(`DELETE FROM expense_categories WHERE id=?`, [req.params.id]);
+    res.json({ ok: true });
+  })
+);
+
 app.get(
   "/api/products",
   requireAuth,
@@ -518,24 +642,30 @@ app.put(
   requireRoles("admin", "owner"),
   asyncHandler(async (req, res) => {
     const b = req.body;
+    const stockPart =
+      b.stock !== undefined && b.stock !== null && String(b.stock).trim() !== ""
+        ? ", stock=?"
+        : "";
+    const params = [
+      b.sku,
+      b.barcode,
+      b.name,
+      b.description || null,
+      b.supplier_id || null,
+      b.purchase_price,
+      b.sell_price,
+      b.min_stock,
+      String(b.unit || "PCS").trim() || "PCS",
+      b.location != null ? String(b.location).trim() || null : null,
+      b.brand != null ? String(b.brand).trim() || null : null,
+      b.is_active ? 1 : 0,
+    ];
+    if (stockPart) params.push(Number(b.stock));
+    params.push(req.params.id);
     await pool.query(
       `UPDATE products SET sku=?, barcode=?, name=?, description=?, supplier_id=?, purchase_price=?, sell_price=?,
-       min_stock=?, unit=?, location=?, brand=?, is_active=? WHERE id=?`,
-      [
-        b.sku,
-        b.barcode,
-        b.name,
-        b.description || null,
-        b.supplier_id || null,
-        b.purchase_price,
-        b.sell_price,
-        b.min_stock,
-        String(b.unit || "PCS").trim() || "PCS",
-        b.location != null ? String(b.location).trim() || null : null,
-        b.brand != null ? String(b.brand).trim() || null : null,
-        b.is_active ? 1 : 0,
-        req.params.id,
-      ]
+       min_stock=?, unit=?, location=?, brand=?, is_active=?${stockPart} WHERE id=?`,
+      params
     );
     await pool.query(`DELETE FROM product_categories WHERE product_id=?`, [req.params.id]);
     if (Array.isArray(b.category_ids)) {
@@ -1068,6 +1198,20 @@ app.get(
   })
 );
 
+app.delete(
+  "/api/transactions/:id",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const [tx] = await pool.query(`SELECT id, status FROM transactions WHERE id=?`, [req.params.id]);
+    if (!tx.length) return res.status(404).json({ error: "Transaksi tidak ada" });
+    if (!["draft", "hold"].includes(String(tx[0].status)))
+      return res.status(400).json({ error: "Hanya transaksi draft atau hold yang bisa dihapus" });
+    await pool.query(`DELETE FROM transactions WHERE id=?`, [req.params.id]);
+    res.json({ ok: true });
+  })
+);
+
 app.post(
   "/api/transactions/:id/refund",
   requireAuth,
@@ -1242,6 +1386,121 @@ app.post(
       }
       await conn.commit();
       res.status(201).json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message });
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+app.put(
+  "/api/cash-flows/:id",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const b = req.body;
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(`SELECT * FROM cash_flows WHERE id=? FOR UPDATE`, [id]);
+      if (!rows.length) {
+        await conn.rollback();
+        return res.status(404).json({ error: "Aliran kas tidak ada" });
+      }
+      const row = rows[0];
+      if (row.type !== "in" && row.type !== "out") {
+        throw new Error("Hanya jenis masuk atau keluar yang dapat diubah");
+      }
+      if (row.reference && String(row.reference).startsWith("trx:")) {
+        throw new Error("Aliran dari penjualan tidak dapat diubah dari sini");
+      }
+
+      const newAcc = Number(b.cash_account_id != null ? b.cash_account_id : row.cash_account_id);
+      const newAmt = Number(b.amount != null ? b.amount : row.amount);
+      if (!Number.isFinite(newAmt) || newAmt <= 0) throw new Error("Jumlah tidak valid");
+      const newDesc = b.description != null ? String(b.description) : row.description;
+      const rawDate = b.flow_date != null ? String(b.flow_date) : row.flow_date;
+      const newFlowDate = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate.slice(0, 10) : row.flow_date;
+
+      let category_id = row.category_id;
+      let category_type = row.category_type;
+      if (row.type === "out" && b.expense_category_id !== undefined) {
+        category_id = b.expense_category_id ? Number(b.expense_category_id) : null;
+        category_type = category_id ? "expense" : null;
+      }
+      if (row.type === "in" && b.income_category_id !== undefined) {
+        category_id = b.income_category_id ? Number(b.income_category_id) : null;
+        category_type = category_id ? "income" : null;
+      }
+
+      const accIds = [...new Set([Number(row.cash_account_id), newAcc])].sort((a, b) => a - b);
+      for (const aid of accIds) {
+        await conn.query(`SELECT id FROM cash_accounts WHERE id=? FOR UPDATE`, [aid]);
+      }
+
+      if (row.type === "out") {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [row.amount, row.cash_account_id]);
+      } else {
+        await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [row.amount, row.cash_account_id]);
+      }
+
+      if (row.type === "out") {
+        const [chk] = await conn.query(`SELECT balance FROM cash_accounts WHERE id=?`, [newAcc]);
+        if (!chk.length || Number(chk[0].balance) < newAmt) throw new Error("Saldo tidak cukup");
+        await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [newAmt, newAcc]);
+      } else {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [newAmt, newAcc]);
+      }
+
+      await conn.query(
+        `UPDATE cash_flows SET cash_account_id=?, amount=?, category_id=?, category_type=?, description=?, flow_date=? WHERE id=?`,
+        [newAcc, newAmt, category_id, category_type, newDesc || null, newFlowDate, id]
+      );
+      await conn.commit();
+      res.json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message });
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+app.delete(
+  "/api/cash-flows/:id",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [rows] = await conn.query(`SELECT * FROM cash_flows WHERE id=? FOR UPDATE`, [id]);
+      if (!rows.length) {
+        await conn.rollback();
+        return res.status(404).json({ error: "Aliran kas tidak ada" });
+      }
+      const row = rows[0];
+      if (row.type !== "in" && row.type !== "out") {
+        throw new Error("Hanya jenis masuk atau keluar yang dapat dihapus");
+      }
+      if (row.reference && String(row.reference).startsWith("trx:")) {
+        throw new Error("Aliran dari penjualan tidak dapat dihapus dari sini");
+      }
+
+      await conn.query(`SELECT id FROM cash_accounts WHERE id=? FOR UPDATE`, [row.cash_account_id]);
+      if (row.type === "out") {
+        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [row.amount, row.cash_account_id]);
+      } else {
+        await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [row.amount, row.cash_account_id]);
+      }
+      await conn.query(`DELETE FROM cash_flows WHERE id=?`, [id]);
+      await conn.commit();
+      res.json({ ok: true });
     } catch (e) {
       await conn.rollback();
       res.status(400).json({ error: e.message });
@@ -1587,6 +1846,7 @@ app.get(
     const tax = Number(sales.tax_amount);
     const gross = Number(sales.gross_profit);
     const expenseTotal = Number(ops.total);
+    const breakdownSum = breakdown.reduce((s, r) => s + Number(r.amount), 0);
     const netProfit = gross - expenseTotal;
     const denom = revenue - tax || revenue || 1;
     res.json({
@@ -1599,6 +1859,7 @@ app.get(
         tax_amount: tax,
         gross_profit: gross,
         operational_expense: expenseTotal,
+        expense_by_category_total: breakdownSum,
         net_profit: netProfit,
         pct_gross: denom !== 0 ? (gross / denom) * 100 : null,
         pct_net: denom !== 0 ? (netProfit / denom) * 100 : null,

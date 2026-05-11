@@ -69,6 +69,14 @@ export default function SettingsPage() {
           Simpan
         </button>
       </form>
+
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+        <p className="font-semibold text-slate-900 dark:text-white">Cetak & printer thermal (HP / tablet)</p>
+        <p className="mt-2 leading-relaxed">
+          Browser tidak bisa memilih printer Bluetooth secara langsung seperti aplikasi native. Di POS gunakan tombol Struk → dialog cetak sistem; pilih
+          aplikasi/driver thermal (mis. RawBT, PrintHand, vendor printer) jika printer hanya Bluetooth. USB OTG ke printer termal biasanya paling stabil.
+        </p>
+      </div>
     </div>
   );
 }

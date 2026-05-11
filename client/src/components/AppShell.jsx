@@ -5,6 +5,7 @@ import {
   ShoppingCart,
   Package,
   FolderOpen,
+  FolderTree,
   Printer,
   ClipboardList,
   SlidersHorizontal,
@@ -15,7 +16,7 @@ import {
   Receipt,
   Wallet,
   BarChart3,
-  UserCog,
+  Shield,
   Settings,
   Menu,
   LogOut,
@@ -29,23 +30,33 @@ import toast from "react-hot-toast";
 import clsx from "clsx";
 
 const nav = [
-  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "kasir", "owner"] },
-  { to: "/app/pos", label: "POS", icon: ShoppingCart, roles: ["admin", "kasir", "owner"] },
-  { to: "/app/products", label: "Barang", icon: Package, roles: ["admin", "owner"] },
-  { to: "/app/categories", label: "Kategori", icon: FolderOpen, roles: ["admin", "owner"] },
-  { to: "/app/barcode-labels", label: "Cetak barcode", icon: Printer, roles: ["admin", "owner"] },
-  { to: "/app/stock-summary", label: "Data stok", icon: ClipboardList, roles: ["admin", "owner"] },
-  { to: "/app/stock-adjust", label: "Penyesuaian stok", icon: SlidersHorizontal, roles: ["admin", "owner"] },
-  { to: "/app/low-stock", label: "Stok menipis", icon: AlertTriangle, roles: ["admin", "owner"] },
-  { to: "/app/expenses", label: "Pengeluaran", icon: Banknote, roles: ["admin", "owner"] },
-  { to: "/app/customers", label: "Pelanggan", icon: Users, roles: ["admin", "kasir", "owner"] },
-  { to: "/app/suppliers", label: "Supplier", icon: Truck, roles: ["admin", "owner"] },
-  { to: "/app/transactions", label: "Transaksi", icon: Receipt, roles: ["admin", "kasir", "owner"] },
-  { to: "/app/cash-flow", label: "Cash Flow", icon: Wallet, roles: ["admin", "owner"] },
-  { to: "/app/reports", label: "Laporan", icon: BarChart3, roles: ["admin", "owner"] },
-  { to: "/app/employees", label: "Karyawan & Gaji", icon: UserCog, roles: ["admin", "owner"] },
-  { to: "/app/settings", label: "Pengaturan", icon: Settings, roles: ["admin"] },
+  { to: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard, roles: ["admin", "kasir", "owner"], perm: "dashboard" },
+  { to: "/app/pos", label: "POS", icon: ShoppingCart, roles: ["admin", "kasir", "owner"], perm: "pos" },
+  { to: "/app/products", label: "Barang", icon: Package, roles: ["admin", "owner"], perm: "products" },
+  { to: "/app/categories", label: "Kategori", icon: FolderOpen, roles: ["admin", "owner"], perm: "categories" },
+  { to: "/app/barcode-labels", label: "Cetak barcode", icon: Printer, roles: ["admin", "owner"], perm: "barcode_labels" },
+  { to: "/app/stock-summary", label: "Data stok", icon: ClipboardList, roles: ["admin", "owner"], perm: "stock_summary" },
+  { to: "/app/stock-adjust", label: "Penyesuaian stok", icon: SlidersHorizontal, roles: ["admin", "owner"], perm: "stock_adjust" },
+  { to: "/app/low-stock", label: "Stok menipis", icon: AlertTriangle, roles: ["admin", "owner"], perm: "low_stock" },
+  { to: "/app/expenses", label: "Pengeluaran", icon: Banknote, roles: ["admin", "owner"], perm: "expenses" },
+  { to: "/app/expense-categories", label: "Kat. pengeluaran", icon: FolderTree, roles: ["admin", "owner"], perm: "expense_categories" },
+  { to: "/app/customers", label: "Pelanggan", icon: Users, roles: ["admin", "kasir", "owner"], perm: "customers" },
+  { to: "/app/suppliers", label: "Supplier", icon: Truck, roles: ["admin", "owner"], perm: "suppliers" },
+  { to: "/app/transactions", label: "Transaksi", icon: Receipt, roles: ["admin", "kasir", "owner"], perm: "transactions" },
+  { to: "/app/cash-flow", label: "Cash Flow", icon: Wallet, roles: ["admin", "owner"], perm: "cashflow" },
+  { to: "/app/reports", label: "Laporan", icon: BarChart3, roles: ["admin", "owner"], perm: "reports" },
+  { to: "/app/users", label: "Pengguna & akses", icon: Shield, roles: ["admin"], perm: "users" },
+  { to: "/app/settings", label: "Pengaturan", icon: Settings, roles: ["admin"], perm: "settings" },
 ];
+
+function canAccessNavItem(user, item) {
+  if (!user?.role_name) return false;
+  if (!item.roles.includes(user.role_name)) return false;
+  const perms = user.permissions;
+  if (!perms || perms.length === 0) return true;
+  if (perms.includes("all")) return true;
+  return item.perm ? perms.includes(item.perm) : true;
+}
 
 export function AppShell() {
   const user = useAuthStore((s) => s.user);
@@ -60,7 +71,7 @@ export function AppShell() {
     initTheme();
   }, [initTheme]);
 
-  const filtered = nav.filter((n) => n.roles.includes(user?.role_name));
+  const filtered = nav.filter((n) => canAccessNavItem(user, n));
 
   function handleLogout() {
     logout();

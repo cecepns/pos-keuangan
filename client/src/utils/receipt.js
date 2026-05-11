@@ -1,5 +1,15 @@
 import { formatIDR } from "./format";
 
+/** Normalisasi ke angka WA Indonesia (62…) untuk tautan wa.me */
+export function normalizeWhatsAppPhone(input) {
+  const d = String(input || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.startsWith("62")) return d;
+  if (d.startsWith("0")) return `62${d.slice(1)}`;
+  if (d.length >= 9) return `62${d}`;
+  return d;
+}
+
 /** Struk HTML untuk window.print — dioptimalkan printer termal (lebar mm) */
 export function buildThermalReceiptHtml({
   storeName = "Toko",

@@ -195,12 +195,16 @@ export default function ReportsPage() {
             </div>
             <div>
               <h3 className="mb-2 font-semibold">Pengeluaran per kategori</h3>
+              <p className="mb-2 text-xs text-slate-500">
+                Total nominal per tipe: {formatIDR(pl.summary?.expense_by_category_total ?? 0)} · Grand total biaya operasional periode:{" "}
+                {formatIDR(pl.summary?.operational_expense ?? 0)}
+              </p>
               <div className={REPORT_TABLE_SCROLL}>
                 <table className={PAGE_TABLE}>
                   <thead>
                     <tr className="border-b">
                       <th className="py-2 text-left">Tipe</th>
-                      <th className="py-2 text-right">Jumlah</th>
+                      <th className="py-2 text-right">Nominal</th>
                       <th className="py-2 text-right">%</th>
                     </tr>
                   </thead>
@@ -213,6 +217,19 @@ export default function ReportsPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-slate-200 font-semibold dark:border-slate-600">
+                      <td className="py-2">Jumlah per kategori</td>
+                      <td className="py-2 text-right tabular-nums">{formatIDR(pl.summary?.expense_by_category_total ?? 0)}</td>
+                      <td className="py-2 text-right">100%</td>
+                    </tr>
+                    <tr className="font-bold text-brand-800 dark:text-brand-200">
+                      <td className="py-2">Grand total pengeluaran (periode)</td>
+                      <td className="py-2 text-right tabular-nums" colSpan={2}>
+                        {formatIDR(pl.summary?.operational_expense ?? 0)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>

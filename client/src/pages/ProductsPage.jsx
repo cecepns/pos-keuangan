@@ -15,6 +15,7 @@ import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { useThemeStore } from "../store/themeStore";
 import JsBarcode from "jsbarcode";
+import { uploadSrc } from "../utils/uploadUrl";
 
 function selectStyles(isDark) {
   const border = isDark ? "#334155" : "#e2e8f0";
@@ -169,6 +170,7 @@ export default function ProductsPage() {
   }
 
   async function onSubmit(values) {
+    const stockNum = Number(values.stock);
     const payload = {
       ...values,
       supplier_id: values.supplier_id || null,
@@ -180,6 +182,11 @@ export default function ProductsPage() {
       location: values.location || null,
       brand: values.brand || null,
     };
+    if (values.id) {
+      if (Number.isFinite(stockNum)) payload.stock = stockNum;
+    } else {
+      payload.stock = Number.isFinite(stockNum) ? stockNum : 0;
+    }
     const t = toast.loading("Menyimpan...");
     try {
       if (values.id) {
@@ -284,13 +291,14 @@ export default function ProductsPage() {
       <div className={`${PAGE_TABLE_WRAP} overflow-x-auto`}>
         {loading ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={12} />
+            <TableSkeleton rows={6} cols={13} />
           </div>
         ) : (
-          <table className={`${PAGE_TABLE} min-w-[960px] divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
+          <table className={`${PAGE_TABLE} min-w-[1040px] divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
             <thead className="bg-slate-50 dark:bg-slate-800/80">
               <tr>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Aksi</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Foto</th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">SKU</th>
                 <th className="min-w-[8rem] px-4 py-3 text-left font-semibold">Nama</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Beli</th>
@@ -323,6 +331,22 @@ export default function ProductsPage() {
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    {p.image_path ? (
+                      <img
+                        src={uploadSrc(p.image_path)}
+                        alt=""
+                        className="h-12 w-12 rounded-lg border border-slate-200 object-cover dark:border-slate-700"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.target.style.display = "none";
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{p.sku}</td>
                   <td className="px-4 py-3 font-medium">{p.name}</td>
@@ -381,12 +405,10 @@ export default function ProductsPage() {
             <label className="text-xs text-slate-500">Harga jual</label>
             <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("sell_price")} />
           </div>
-          {!form.watch("id") && (
-            <div>
-              <label className="text-xs text-slate-500">Stok awal</label>
-              <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("stock")} />
-            </div>
-          )}
+          <div>
+            <label className="text-xs text-slate-500">{form.watch("id") ? "Stok saat ini (ubah langsung)" : "Stok awal"}</label>
+            <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("stock")} />
+          </div>
           <div>
             <label className="text-xs text-slate-500">Min stok</label>
             <input type="number" className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950" {...form.register("min_stock")} />

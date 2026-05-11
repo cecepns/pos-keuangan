@@ -155,7 +155,7 @@ export default function Dashboard() {
       </div>
 
       {showFinance && data.cashFlow && (
-        <div className="grid gap-4 md:grid-cols-3">
+        <div className="grid gap-4 md:grid-cols-2">
           <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
             <p className="text-sm text-slate-500">Kas masuk (hari ini)</p>
             <p className="mt-1 text-xl font-bold text-emerald-600">{formatIDR(data.cashFlow.in)}</p>
@@ -163,12 +163,6 @@ export default function Dashboard() {
           <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
             <p className="text-sm text-slate-500">Kas keluar (hari ini)</p>
             <p className="mt-1 text-xl font-bold text-red-500">{formatIDR(data.cashFlow.out)}</p>
-          </div>
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-sm text-slate-500">Piutang / Hutang berjalan</p>
-            <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-              P: {formatIDR(data.debt?.piutang || 0)} · H: {formatIDR(data.debt?.hutang || 0)}
-            </p>
           </div>
         </div>
       )}

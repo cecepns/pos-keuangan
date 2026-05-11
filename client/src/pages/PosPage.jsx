@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   Search,
@@ -20,10 +21,11 @@ import { formatIDR } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { PageStack } from "../components/TableCard";
-import { buildThermalReceiptHtml, buildReceiptWhatsAppText } from "../utils/receipt";
+import { buildThermalReceiptHtml, buildReceiptWhatsAppText, normalizeWhatsAppPhone } from "../utils/receipt";
 import { parseOptionalFloat, parseOptionalInt } from "../utils/numericInput";
 
 const PRODUCT_PAGE_SIZE = 48;
+const POS_DRAFT_KEY = "pos-keuangan-draft-v1";
 
 export default function PosPage() {
   const [q, setQ] = useState("");
@@ -65,6 +67,10 @@ export default function PosPage() {
   const [discountDraft, setDiscountDraft] = useState(null);
   const [taxDraft, setTaxDraft] = useState(null);
   const barcodeRef = useRef(null);
+  const payModalOpenedRef = useRef(false);
+  const draftResumeIdRef = useRef(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [receiptWaPhone, setReceiptWaPhone] = useState("");
 
   const fetchProductPage = useCallback(
     async (pageNum, append) => {
@@ -134,6 +140,12 @@ export default function PosPage() {
       }
     })();
   }, [custQ]);
+
+  useEffect(() => {
+    if (!customerId) return;
+    const c = customers.find((x) => String(x.id) === String(customerId));
+    if (c?.whatsapp) setReceiptWaPhone(String(c.whatsapp).replace(/\D/g, ""));
+  }, [customerId, customers]);
 
   function addToCart(p) {
     const avail = availableOnGrid(p);
@@ -215,8 +227,110 @@ export default function PosPage() {
   const grandTotal = useMemo(() => subtotal - discountTotal + taxAmount, [subtotal, discountTotal, taxAmount]);
 
   useEffect(() => {
-    if (payOpen && grandTotal > 0) setCashAmtStr(String(Math.round(grandTotal)));
-  }, [payOpen, grandTotal]);
+    if (payOpen && !payModalOpenedRef.current) {
+      payModalOpenedRef.current = true;
+      setCashAmtStr("");
+      setTransferAmtStr("");
+      setQrisAmtStr("");
+      setDebtAmtStr("");
+    }
+    if (!payOpen) payModalOpenedRef.current = false;
+  }, [payOpen]);
+
+  useEffect(() => {
+    try {
+      if (new URLSearchParams(window.location.search).get("resume")) return;
+      const raw = localStorage.getItem(POS_DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (d.v !== 1 || !Array.isArray(d.cart)) return;
+      if (d.cart.length) setCart(d.cart);
+      if (d.customerId != null) setCustomerId(String(d.customerId));
+      if (typeof d.discountTotal === "number") setDiscountTotal(d.discountTotal);
+      if (typeof d.taxPercent === "number") setTaxPercent(d.taxPercent);
+      if (typeof d.notes === "string") setNotes(d.notes);
+      if (typeof d.saleDate === "string") setSaleDate(d.saleDate);
+    } catch {
+      /* */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        POS_DRAFT_KEY,
+        JSON.stringify({
+          v: 1,
+          cart,
+          customerId,
+          discountTotal,
+          taxPercent,
+          notes,
+          saleDate,
+        })
+      );
+    } catch {
+      /* */
+    }
+  }, [cart, customerId, discountTotal, taxPercent, notes, saleDate]);
+
+  const resumeId = searchParams.get("resume");
+  useEffect(() => {
+    if (!resumeId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await api.get(`/api/transactions/${resumeId}`, { skipToast: true });
+        if (cancelled || !data || !["draft", "hold"].includes(String(data.status))) {
+          setSearchParams({}, { replace: true });
+          return;
+        }
+        const lines = await Promise.all(
+          (data.items || []).map(async (it) => {
+            try {
+              const { data: pr } = await api.get(`/api/products/${it.product_id}`, { skipToast: true });
+              return {
+                product_id: it.product_id,
+                name: it.product_name,
+                barcode: it.barcode || pr.barcode,
+                stock: Number(pr.stock),
+                purchase_price: Number(it.purchase_price ?? pr.purchase_price),
+                sell_price: Number(it.sell_price),
+                qty: Number(it.qty),
+                discount_amount: Number(it.discount_amount || 0),
+              };
+            } catch {
+              return {
+                product_id: it.product_id,
+                name: it.product_name,
+                barcode: it.barcode,
+                stock: Math.max(Number(it.qty), 1),
+                purchase_price: Number(it.purchase_price),
+                sell_price: Number(it.sell_price),
+                qty: Number(it.qty),
+                discount_amount: Number(it.discount_amount || 0),
+              };
+            }
+          })
+        );
+        if (cancelled) return;
+        setCart(lines);
+        draftResumeIdRef.current = Number(resumeId);
+        if (data.customer_id) setCustomerId(String(data.customer_id));
+        setNotes(data.notes || "");
+        setDiscountTotal(Number(data.discount_total || 0));
+        setTaxPercent(Number(data.tax_percent || 0));
+        if (data.sale_date) setSaleDate(String(data.sale_date).slice(0, 10));
+        setSearchParams({}, { replace: true });
+        toast.success("Draft/hold dimuat — lanjutkan transaksi");
+      } catch {
+        setSearchParams({}, { replace: true });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resumeId, setSearchParams]);
 
   const marginTotal = useMemo(
     () =>
@@ -277,13 +391,25 @@ export default function PosPage() {
   async function submitSale(status = "completed") {
     const pays = status === "completed" ? buildPayments() : [];
     if (status === "completed") {
+      if (cashAmt > 0 && !cashAccountId) {
+        toast.error("Pilih akun kas untuk pembayaran tunai");
+        return;
+      }
+      if (transferAmt > 0 && !transferAcc) {
+        toast.error("Pilih rekening untuk transfer");
+        return;
+      }
+      if (qrisAmt > 0 && !qrisAcc) {
+        toast.error("Pilih akun untuk QRIS");
+        return;
+      }
       const sum = pays.reduce((s, x) => s + Number(x.amount || 0), 0);
       if (grandTotal > 0.01 && sum + 0.02 < grandTotal) {
         toast.error("Total pembayaran kurang dari grand total");
         return;
       }
       if (debtAmt > 0 && !customerId) {
-        toast.error("Pilih pelanggan untuk piutang");
+        toast.error("Pilih pelanggan untuk piutang (sisa pembayaran)");
         return;
       }
     }
@@ -306,7 +432,17 @@ export default function PosPage() {
     try {
       const { data } = await api.post("/api/transactions", payload);
       toast.success(data.invoice_no || "Tersimpan", { id: t });
+      if (draftResumeIdRef.current) {
+        const rid = draftResumeIdRef.current;
+        draftResumeIdRef.current = null;
+        api.delete(`/api/transactions/${rid}`, { skipToast: true }).catch(() => {});
+      }
       if (status === "completed") {
+        try {
+          localStorage.removeItem(POS_DRAFT_KEY);
+        } catch {
+          /* */
+        }
         setCart([]);
         setLineDraft({});
         setDiscountTotal(0);
@@ -352,7 +488,12 @@ export default function PosPage() {
     w.document.close();
   }
 
-  function waNota() {
+  function waNotaToNumber(phoneDigits) {
+    const wa = normalizeWhatsAppPhone(phoneDigits);
+    if (!wa) {
+      toast.error("Isi nomor WhatsApp tujuan");
+      return;
+    }
     const pays = receiptPaymentsFromDraft();
     const paidSum = pays.reduce((s, p) => s + p.amount, 0);
     const changeAmt = Math.max(0, paidSum - grandTotal);
@@ -371,7 +512,7 @@ export default function PosPage() {
         changeAmount: changeAmt,
       })
     );
-    window.open(`https://wa.me/?text=${text}`, "_blank");
+    window.open(`https://wa.me/${wa}?text=${text}`, "_blank");
   }
 
   async function handleBarcode(e) {
@@ -405,11 +546,12 @@ export default function PosPage() {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       JsBarcode(svg, String(code), {
         format: "CODE128",
-        width: 1.6,
-        height: 44,
-        displayValue: false,
-        fontSize: 11,
-        margin: 0,
+        width: 2.4,
+        height: 72,
+        displayValue: true,
+        fontSize: 14,
+        textMargin: 4,
+        margin: 12,
       });
       const bottom = String(p.barcode || p.sku || code).replace(/</g, "&lt;");
       labels.push(
@@ -466,19 +608,15 @@ export default function PosPage() {
           >
             <Printer className="h-4 w-4" /> Struk
           </button>
-          <button
-            type="button"
-            onClick={waNota}
-            disabled={!cart.length}
-            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm text-white disabled:opacity-50"
-          >
-            <MessageCircle className="h-4 w-4" /> WhatsApp
-          </button>
         </div>
       </div>
+      <p className="text-xs text-slate-500 dark:text-slate-400">
+        Cetak dari HP/tablet: gunakan tombol Struk lalu pilih printer di dialog sistem. Untuk printer thermal Bluetooth, biasanya perlu aplikasi pembantu (mis. RawBT, Mopria, atau driver vendor) agar browser bisa mengirim ke printer; kabel USB OTG tetap paling andal.
+      </p>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="min-w-0 space-y-3 xl:col-span-2">
+          <div className="sticky top-0 z-10 space-y-3 rounded-b-2xl bg-slate-50/95 pb-2 pt-1 backdrop-blur dark:bg-slate-950/95">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" />
             <input
@@ -496,6 +634,7 @@ export default function PosPage() {
               placeholder="Scan barcode (Enter)"
               onKeyDown={handleBarcode}
             />
+          </div>
           </div>
           <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-2xl border border-slate-100 dark:border-slate-800">
             <div className="grid gap-2 p-2 sm:grid-cols-2">
@@ -575,7 +714,7 @@ export default function PosPage() {
               ))}
             </div>
           </div>
-          <div className="max-h-64 space-y-2 overflow-auto">
+          <div className="max-h-[min(480px,58vh)] space-y-3 overflow-auto">
             {cart.length === 0 && <p className="text-sm text-slate-500">Belum ada item</p>}
             {cart.map((c) => {
               const gross = c.sell_price * c.qty;
@@ -589,32 +728,32 @@ export default function PosPage() {
               return (
                 <div key={c.product_id} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
                   <div className="flex justify-between gap-2">
-                    <span className="text-sm font-medium">{c.name}</span>
+                    <span className="text-base font-semibold leading-snug text-slate-900 dark:text-white">{c.name}</span>
                     <button type="button" onClick={() => removeLine(c.product_id)} className="text-red-500">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
                   {disc > 0 ? (
-                    <p className="mt-1 text-xs text-slate-500">
+                    <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                       <span className="line-through">{formatIDR(gross)}</span>{" "}
-                      <span className="font-semibold text-brand-700">{formatIDR(net)}</span>{" "}
-                      <span>(diskon {formatIDR(disc)})</span>
+                      <span className="text-base font-bold text-brand-700 dark:text-brand-300">{formatIDR(net)}</span>{" "}
+                      <span className="text-xs">(diskon {formatIDR(disc)})</span>
                     </p>
                   ) : (
-                    <p className="mt-1 text-xs text-slate-500">Subtotal baris {formatIDR(net)}</p>
+                    <p className="mt-1 text-sm font-medium text-slate-700 dark:text-slate-300">Subtotal baris {formatIDR(net)}</p>
                   )}
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                    <label>
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <label className="font-medium text-slate-700 dark:text-slate-300">
                       Qty (maks{" "}
                       {capQty})
-                      <div className="flex items-center gap-1">
-                        <button type="button" className="rounded bg-white p-1 dark:bg-slate-900" onClick={() => updateLine(c.product_id, { qty: Math.max(1, c.qty - 1) })}>
-                          <Minus className="h-3 w-3" />
+                      <div className="mt-1 flex items-center gap-2">
+                        <button type="button" className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-900" onClick={() => updateLine(c.product_id, { qty: Math.max(1, c.qty - 1) })}>
+                          <Minus className="h-4 w-4" />
                         </button>
                         <input
                           type="text"
                           inputMode="numeric"
-                          className="w-full rounded border px-1 dark:border-slate-600 dark:bg-slate-950"
+                          className="min-h-[44px] w-full rounded-lg border px-2 text-base dark:border-slate-600 dark:bg-slate-950"
                           value={qtyShow}
                           onChange={(e) =>
                             setLineDraft((m) => ({
@@ -639,20 +778,20 @@ export default function PosPage() {
                         />
                         <button
                           type="button"
-                          className="rounded bg-white p-1 dark:bg-slate-900"
+                          className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-900"
                           onClick={() => updateLine(c.product_id, { qty: c.qty + 1 })}
                           disabled={c.qty >= capQty}
                         >
-                          <Plus className="h-3 w-3" />
+                          <Plus className="h-4 w-4" />
                         </button>
                       </div>
                     </label>
-                    <label>
+                    <label className="font-medium text-slate-700 dark:text-slate-300">
                       Harga jual
                       <input
                         type="text"
                         inputMode="decimal"
-                        className="mt-1 w-full rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border px-2 py-2 text-base dark:border-slate-600 dark:bg-slate-950"
                         value={sellShow}
                         onChange={(e) =>
                           setLineDraft((m) => ({
@@ -675,12 +814,12 @@ export default function PosPage() {
                         }}
                       />
                     </label>
-                    <label className="col-span-2">
+                    <label className="col-span-2 font-medium text-slate-700 dark:text-slate-300">
                       Diskon baris (rupiah)
                       <input
                         type="text"
                         inputMode="decimal"
-                        className="mt-1 w-full rounded border px-2 py-1 dark:border-slate-600 dark:bg-slate-950"
+                        className="mt-1 min-h-[44px] w-full rounded-lg border px-2 py-2 text-base dark:border-slate-600 dark:bg-slate-950"
                         value={discShow}
                         onChange={(e) =>
                           setLineDraft((m) => ({
@@ -767,11 +906,31 @@ export default function PosPage() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Kirim struk online (WhatsApp)</p>
+              <label className="mt-2 block text-xs text-slate-600 dark:text-slate-400">Nomor WA tujuan (otomatis dari pelanggan jika ada)</label>
+              <input
+                type="tel"
+                inputMode="numeric"
+                className="mt-1 w-full rounded-xl border border-emerald-200/80 bg-white px-3 py-2.5 text-base dark:border-emerald-800 dark:bg-slate-950"
+                placeholder="62812… atau 0812…"
+                value={receiptWaPhone}
+                onChange={(e) => setReceiptWaPhone(e.target.value.replace(/[^\d]/g, ""))}
+              />
+              <button
+                type="button"
+                disabled={!cart.length}
+                onClick={() => waNotaToNumber(receiptWaPhone)}
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                <MessageCircle className="h-4 w-4" /> Kirim teks struk ke WA
+              </button>
+            </div>
             <button
               type="button"
               onClick={() => setPayOpen(true)}
               disabled={!cart.length}
-              className="w-full rounded-2xl bg-brand-600 py-3 font-semibold text-white shadow-soft disabled:opacity-50"
+              className="w-full rounded-2xl bg-brand-600 py-3 text-base font-semibold text-white shadow-soft disabled:opacity-50"
             >
               Bayar
             </button>
@@ -866,6 +1025,64 @@ export default function PosPage() {
               onChange={(e) => setDebtAmtStr(e.target.value.replace(/[^\d]/g, "").slice(0, 14))}
             />
           </div>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 border-b border-slate-100 pb-3 dark:border-slate-800">
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
+            onClick={() => setCashAmtStr(String(Math.max(0, Math.round(grandTotal))))}
+          >
+            Isi tunai = total
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
+            onClick={() => {
+              setCashAmtStr("");
+              setDebtAmtStr("");
+              setTransferAmtStr(String(Math.max(0, Math.round(grandTotal))));
+              if (!transferAcc && cashAccounts[0]) setTransferAcc(String(cashAccounts[0].id));
+            }}
+          >
+            Transfer saja = total
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
+            onClick={() => {
+              setCashAmtStr("");
+              setDebtAmtStr("");
+              setTransferAmtStr("");
+              setQrisAmtStr(String(Math.max(0, Math.round(grandTotal))));
+              if (!qrisAcc && cashAccounts[0]) setQrisAcc(String(cashAccounts[0].id));
+            }}
+          >
+            QRIS saja = total
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium dark:border-slate-600"
+            onClick={() => {
+              setCashAmtStr("");
+              setTransferAmtStr("");
+              setQrisAmtStr("");
+              setDebtAmtStr(String(Math.max(0, Math.round(grandTotal))));
+            }}
+          >
+            Piutang saja = total
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-dashed border-slate-300 px-3 py-1.5 text-xs dark:border-slate-600"
+            onClick={() => {
+              setCashAmtStr("");
+              setTransferAmtStr("");
+              setQrisAmtStr("");
+              setDebtAmtStr("");
+            }}
+          >
+            Kosongkan nominal
+          </button>
         </div>
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setPayOpen(false)}>

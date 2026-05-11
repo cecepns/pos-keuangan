@@ -10,18 +10,36 @@ ON DUPLICATE KEY UPDATE name=VALUES(name);
 
 INSERT IGNORE INTO permissions (code, description) VALUES
 ('all', 'Semua akses'),
+('dashboard', 'Dashboard'),
 ('pos', 'Kasir POS'),
 ('products', 'Produk'),
+('categories', 'Kategori produk'),
+('barcode_labels', 'Cetak barcode'),
+('stock_summary', 'Data stok'),
+('stock_adjust', 'Penyesuaian stok'),
+('low_stock', 'Stok menipis'),
+('expenses', 'Pengeluaran'),
+('expense_categories', 'Kategori pengeluaran'),
 ('customers', 'Pelanggan'),
 ('suppliers', 'Supplier'),
 ('transactions', 'Transaksi'),
 ('cashflow', 'Cash flow'),
 ('reports', 'Laporan'),
 ('employees', 'Karyawan'),
+('users', 'Pengguna & hak akses'),
 ('settings', 'Pengaturan');
 
 INSERT IGNORE INTO role_permissions (role_id, permission_id)
 SELECT 1, id FROM permissions WHERE code='all';
+
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT 2, id FROM permissions WHERE code IN ('dashboard','pos','customers','transactions');
+
+INSERT IGNORE INTO role_permissions (role_id, permission_id)
+SELECT 3, id FROM permissions WHERE code IN (
+  'dashboard','pos','products','categories','barcode_labels','stock_summary','stock_adjust','low_stock',
+  'expenses','expense_categories','customers','suppliers','transactions','cashflow','reports'
+);
 
 INSERT INTO stores (id, name, address, phone) VALUES
 (1, 'Toko Anggrek Sejahtera', 'Jl. Florikultura No. 88, Bogor', '081234567890')
@@ -89,7 +107,3 @@ ON DUPLICATE KEY UPDATE value=VALUES(value);
 
 INSERT INTO printers (store_id, name, connection_type, paper_width_mm, is_default) VALUES
 (1, 'Thermal Kasir', 'bluetooth', 58, 1);
-
-INSERT INTO employees (user_id, name, phone, position, base_salary, hire_date, is_active) VALUES
-(2, 'Kasir Ani', '081298765432', 'Kasir', 4500000, '2024-01-15', 1),
-(NULL, 'Gudang Joko', '081355566677', 'Staff Gudang', 4000000, '2024-03-01', 1);

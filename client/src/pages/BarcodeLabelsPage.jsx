@@ -108,11 +108,12 @@ export default function BarcodeLabelsPage() {
       const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
       JsBarcode(svg, String(code), {
         format: "CODE128",
-        width: 1.4,
-        height: 40,
-        displayValue: false,
-        /** Default library margin 10px → jarak title/kode terasa jauh */
-        margin: 0,
+        width: 2.2,
+        height: 64,
+        displayValue: true,
+        fontSize: 12,
+        textMargin: 3,
+        margin: 10,
       });
       cells.push(
         `<div class="cell">

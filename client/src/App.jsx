@@ -4,6 +4,7 @@ import api from "./api/client";
 import { useAuthStore } from "./store/authStore";
 import { useThemeStore } from "./store/themeStore";
 import { ProtectedRoute } from "./components/ProtectedRoute";
+import { PermGate } from "./components/PermGate";
 import { AppShell } from "./components/AppShell";
 import { Skeleton } from "./components/Skeleton";
 
@@ -22,8 +23,9 @@ const SuppliersPage = lazy(() => import("./pages/SuppliersPage.jsx"));
 const TransactionsPage = lazy(() => import("./pages/TransactionsPage.jsx"));
 const CashFlowPage = lazy(() => import("./pages/CashFlowPage.jsx"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage.jsx"));
-const EmployeesPage = lazy(() => import("./pages/EmployeesPage.jsx"));
 const SettingsPage = lazy(() => import("./pages/SettingsPage.jsx"));
+const ExpenseCategoriesPage = lazy(() => import("./pages/ExpenseCategoriesPage.jsx"));
+const UsersPage = lazy(() => import("./pages/UsersPage.jsx"));
 const NotFound = lazy(() => import("./pages/NotFound.jsx"));
 
 function PageLoader() {
@@ -62,22 +64,23 @@ export default function App() {
         <Route element={<ProtectedRoute />}>
           <Route path="/app" element={<AppShell />}>
             <Route index element={<Navigate to="dashboard" replace />} />
-            <Route path="dashboard" element={<Dashboard />} />
-            <Route path="pos" element={<PosPage />} />
-            <Route path="products" element={<ProductsPage />} />
-            <Route path="categories" element={<CategoriesPage />} />
-            <Route path="barcode-labels" element={<BarcodeLabelsPage />} />
-            <Route path="stock-summary" element={<StockSummaryPage />} />
-            <Route path="stock-adjust" element={<StockAdjustPage />} />
-            <Route path="low-stock" element={<LowStockPage />} />
-            <Route path="expenses" element={<OperationalExpensePage />} />
-            <Route path="customers" element={<CustomersPage />} />
-            <Route path="suppliers" element={<SuppliersPage />} />
-            <Route path="transactions" element={<TransactionsPage />} />
-            <Route path="cash-flow" element={<CashFlowPage />} />
-            <Route path="reports" element={<ReportsPage />} />
-            <Route path="employees" element={<EmployeesPage />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="dashboard" element={<PermGate perm="dashboard"><Dashboard /></PermGate>} />
+            <Route path="pos" element={<PermGate perm="pos"><PosPage /></PermGate>} />
+            <Route path="products" element={<PermGate perm="products"><ProductsPage /></PermGate>} />
+            <Route path="categories" element={<PermGate perm="categories"><CategoriesPage /></PermGate>} />
+            <Route path="barcode-labels" element={<PermGate perm="barcode_labels"><BarcodeLabelsPage /></PermGate>} />
+            <Route path="stock-summary" element={<PermGate perm="stock_summary"><StockSummaryPage /></PermGate>} />
+            <Route path="stock-adjust" element={<PermGate perm="stock_adjust"><StockAdjustPage /></PermGate>} />
+            <Route path="low-stock" element={<PermGate perm="low_stock"><LowStockPage /></PermGate>} />
+            <Route path="expenses" element={<PermGate perm="expenses"><OperationalExpensePage /></PermGate>} />
+            <Route path="expense-categories" element={<PermGate perm="expense_categories"><ExpenseCategoriesPage /></PermGate>} />
+            <Route path="customers" element={<PermGate perm="customers"><CustomersPage /></PermGate>} />
+            <Route path="suppliers" element={<PermGate perm="suppliers"><SuppliersPage /></PermGate>} />
+            <Route path="transactions" element={<PermGate perm="transactions"><TransactionsPage /></PermGate>} />
+            <Route path="cash-flow" element={<PermGate perm="cashflow"><CashFlowPage /></PermGate>} />
+            <Route path="reports" element={<PermGate perm="reports"><ReportsPage /></PermGate>} />
+            <Route path="users" element={<PermGate perm="users"><UsersPage /></PermGate>} />
+            <Route path="settings" element={<PermGate perm="settings"><SettingsPage /></PermGate>} />
           </Route>
         </Route>
 
