@@ -74,6 +74,8 @@ export default function PosPage() {
   const barcodeRef = useRef(null);
   const cameraScannerRef = useRef(null);
   const cameraBusyRef = useRef(false);
+  const cameraStartedRef = useRef(false);
+  const resolveScannedCodeRef = useRef(null);
   const payModalOpenedRef = useRef(false);
   const draftResumeIdRef = useRef(null);
   const [searchParams, setSearchParams] = useSearchParams();
@@ -547,6 +549,10 @@ export default function PosPage() {
     [products, addToCart]
   );
 
+  useEffect(() => {
+    resolveScannedCodeRef.current = resolveScannedCode;
+  }, [resolveScannedCode]);
+
   async function handleBarcode(e) {
     if (e.key !== "Enter") return;
     const code = e.target.value.trim();
@@ -559,6 +565,7 @@ export default function PosPage() {
   useEffect(() => {
     if (!cameraScanOpen) return;
     let closed = false;
+    cameraStartedRef.current = false;
 
     (async () => {
       try {
@@ -578,7 +585,7 @@ export default function PosPage() {
             if (cameraBusyRef.current || closed) return;
             cameraBusyRef.current = true;
             setCameraLastCode(decodedText);
-            const ok = await resolveScannedCode(decodedText);
+            const ok = await resolveScannedCodeRef.current?.(decodedText);
             if (!ok) toast.error(`Barcode tidak ditemukan: ${decodedText}`);
             if (navigator.vibrate) navigator.vibrate(60);
             setTimeout(() => {
@@ -587,6 +594,20 @@ export default function PosPage() {
           },
           () => {}
         );
+        cameraStartedRef.current = true;
+        if (closed) {
+          try {
+            await scanner.stop();
+          } catch {
+            /* */
+          }
+          try {
+            await scanner.clear();
+          } catch {
+            /* */
+          }
+          return;
+        }
         if (!closed) setCameraStatus("Kamera aktif — arahkan barcode ke kotak scan.");
       } catch {
         if (!closed) {
@@ -602,14 +623,31 @@ export default function PosPage() {
       const scanner = cameraScannerRef.current;
       cameraScannerRef.current = null;
       if (!scanner) return;
-      scanner
-        .stop()
-        .catch(() => {})
-        .finally(() => {
-          scanner.clear().catch(() => {});
-        });
+      const clearScanner = () => {
+        try {
+          const clearResult = scanner.clear();
+          if (clearResult && typeof clearResult.catch === "function") clearResult.catch(() => {});
+        } catch {
+          /* */
+        }
+      };
+      if (cameraStartedRef.current) {
+        try {
+          const stopResult = scanner.stop();
+          Promise.resolve(stopResult)
+            .catch(() => {})
+            .finally(() => {
+              clearScanner();
+            });
+        } catch {
+          clearScanner();
+        }
+      } else {
+        clearScanner();
+      }
+      cameraStartedRef.current = false;
     };
-  }, [cameraScanOpen, resolveScannedCode]);
+  }, [cameraScanOpen]);
 
   function printBarcodeLabels() {
     const p = products.find((x) => String(x.id) === String(barcodeProdId));
