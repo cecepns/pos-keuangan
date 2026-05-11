@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
+import { Eye, ShoppingCart, Trash2, Undo2 } from "lucide-react";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatDateID, formatDateTimeID, formatIDR } from "../utils/format";
@@ -263,26 +264,46 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
                   <td className="px-4 py-3 capitalize">{x.status}</td>
                   <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button type="button" className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => setDetailId(x.id)}>
-                        Detail
+                    <div className="flex justify-end gap-1">
+                      <button
+                        type="button"
+                        className="rounded-lg p-2 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/30"
+                        title="Detail"
+                        aria-label="Detail transaksi"
+                        onClick={() => setDetailId(x.id)}
+                      >
+                        <Eye className="h-4 w-4" />
                       </button>
                       {x.status === "completed" && (
-                        <button type="button" className="text-xs font-semibold text-red-600 hover:underline" onClick={() => setRefundId(x.id)}>
-                          Refund
+                        <button
+                          type="button"
+                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                          title="Refund"
+                          aria-label="Refund transaksi"
+                          onClick={() => setRefundId(x.id)}
+                        >
+                          <Undo2 className="h-4 w-4" />
                         </button>
                       )}
                       {(x.status === "draft" || x.status === "hold") && (
                         <>
                           <button
                             type="button"
-                            className="text-xs font-semibold text-emerald-600 hover:underline"
+                            className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
+                            title="Lanjut di POS"
+                            aria-label="Lanjut di POS"
                             onClick={() => navigate(`/app/pos?resume=${x.id}`)}
                           >
-                            Lanjut di POS
+                            <ShoppingCart className="h-4 w-4" />
                           </button>
-                          <button type="button" className="text-xs font-semibold text-slate-500 hover:underline" onClick={() => setDeleteDraftId(x.id)}>
-                            Hapus
+                          <button
+                            type="button"
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Hapus draft"
+                            aria-label="Hapus draft atau hold"
+                            onClick={() => setDeleteDraftId(x.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </>
                       )}
