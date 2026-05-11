@@ -1641,26 +1641,29 @@ app.post(
       if (!r.length) throw new Error("Not found");
       const row = r[0];
       const balNow = Number(row.balance);
-      if (amt > balNow + 0.02) throw new Error("Jumlah melebihi sisa piutang");
-      const newPaid = Number(row.paid_amount) + amt;
-      const bal = Number(row.amount) - newPaid;
+      // Toleransi pembulatan rupiah: jika selisih sangat kecil, lunaskan penuh.
+      const payAmt = amt > balNow && amt - balNow <= 1 ? balNow : amt;
+      if (payAmt > balNow + 0.02) throw new Error("Jumlah melebihi sisa piutang");
+      const newPaid = Number(row.paid_amount) + payAmt;
+      const rawBal = Number(row.amount) - newPaid;
+      const bal = Math.abs(rawBal) <= 0.5 ? 0 : rawBal;
       await conn.query(`UPDATE receivables SET paid_amount=?, balance=?, status=? WHERE id=?`, [
         newPaid,
         bal,
         bal <= 0 ? "paid" : "partial",
         req.params.id,
       ]);
-      await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, cash_account_id]);
+      await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [payAmt, cash_account_id]);
       await conn.query(
         `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
          VALUES (?,?,?,?,CURDATE(),?)`,
-        [cash_account_id, "in", amt, `Pelunasan piutang #${req.params.id}`, req.user.id]
+        [cash_account_id, "in", payAmt, `Pelunasan piutang #${req.params.id}`, req.user.id]
       );
       await conn.query(
         `INSERT INTO installment_payments (receivable_id, amount, payment_date, cash_account_id) VALUES (?,?,CURDATE(),?)`,
-        [req.params.id, amt, cash_account_id]
+        [req.params.id, payAmt, cash_account_id]
       );
-      await conn.query(`UPDATE customers SET balance_receivable = balance_receivable - ? WHERE id=?`, [amt, row.customer_id]);
+      await conn.query(`UPDATE customers SET balance_receivable = balance_receivable - ? WHERE id=?`, [payAmt, row.customer_id]);
       await conn.commit();
       res.json({ ok: true });
     } catch (e) {

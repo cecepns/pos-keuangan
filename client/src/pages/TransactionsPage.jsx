@@ -14,7 +14,7 @@ import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/Table
 import { Modal } from "../components/Modal";
 
 const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Piutang" };
-const RECEIVABLE_EPSILON = 0.01;
+const RECEIVABLE_EPSILON = 0.5;
 
 function hasOutstandingReceivable(tx) {
   return Number(tx?.receivable_balance || 0) > RECEIVABLE_EPSILON;
@@ -216,7 +216,7 @@ export default function TransactionsPage() {
       const first = lines[0];
       setPayCtx({ txId: transactionId, invoiceNo: data.invoice_no, lines });
       setPayReceivableId(String(first.id));
-      setPayAmountStr(String(Math.max(0, Math.round(Number(first.balance)))));
+      setPayAmountStr(String(Math.max(0, Math.ceil(Number(first.balance)))));
     } catch {
       toast.error("Gagal memuat data piutang");
       closePayModal();
@@ -639,7 +639,7 @@ export default function TransactionsPage() {
                     const id = e.target.value;
                     setPayReceivableId(id);
                     const ln = payCtx.lines.find((l) => String(l.id) === String(id));
-                    if (ln) setPayAmountStr(String(Math.max(0, Math.round(Number(ln.balance)))));
+                    if (ln) setPayAmountStr(String(Math.max(0, Math.ceil(Number(ln.balance)))));
                   }}
                 >
                   {payCtx.lines.map((r) => (
