@@ -431,7 +431,9 @@ export default function PosPage() {
     const t = toast.loading(status === "completed" ? "Menyimpan..." : "Menyimpan draft...");
     try {
       const { data } = await api.post("/api/transactions", payload);
-      toast.success(data.invoice_no || "Tersimpan", { id: t });
+      const baseMsg = data.invoice_no || "Tersimpan";
+      const hasReceivable = status === "completed" && hutangGap > 0.02;
+      toast.success(hasReceivable ? `${baseMsg} · belum lunas (ada piutang)` : baseMsg, { id: t });
       if (draftResumeIdRef.current) {
         const rid = draftResumeIdRef.current;
         draftResumeIdRef.current = null;

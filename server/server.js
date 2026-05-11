@@ -1203,11 +1203,14 @@ app.get(
       params.push(req.query.to);
     }
     const [rows] = await pool.query(
-      `SELECT SQL_CALC_FOUND_ROWS t.*, u.name AS cashier_name, c.name AS customer_name
+      `SELECT SQL_CALC_FOUND_ROWS t.*, u.name AS cashier_name, c.name AS customer_name,
+              COALESCE((SELECT SUM(r.balance) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_balance
        FROM transactions t
        JOIN users u ON u.id=t.user_id
        LEFT JOIN customers c ON c.id=t.customer_id
-       ${where} ORDER BY t.id DESC LIMIT ? OFFSET ?`,
+       ${where}
+       ORDER BY t.id DESC
+       LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
@@ -1221,8 +1224,14 @@ app.get(
   kasirOrAdmin,
   asyncHandler(async (req, res) => {
     const [tx] = await pool.query(
-      `SELECT t.*, u.name AS cashier_name, c.name AS customer_name, c.whatsapp AS customer_wa
-       FROM transactions t JOIN users u ON u.id=t.user_id LEFT JOIN customers c ON c.id=t.customer_id WHERE t.id=?`,
+      `SELECT t.*, u.name AS cashier_name, c.name AS customer_name, c.whatsapp AS customer_wa,
+              COALESCE((SELECT SUM(r.amount) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_amount,
+              COALESCE((SELECT SUM(r.paid_amount) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_paid_amount,
+              COALESCE((SELECT SUM(r.balance) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_balance
+       FROM transactions t
+       JOIN users u ON u.id=t.user_id
+       LEFT JOIN customers c ON c.id=t.customer_id
+       WHERE t.id=?`,
       [req.params.id]
     );
     if (!tx.length) return res.status(404).json({ error: "Not found" });

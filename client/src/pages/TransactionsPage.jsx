@@ -13,6 +13,11 @@ import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/Table
 import { Modal } from "../components/Modal";
 
 const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Piutang" };
+const RECEIVABLE_EPSILON = 0.01;
+
+function hasOutstandingReceivable(tx) {
+  return Number(tx?.receivable_balance || 0) > RECEIVABLE_EPSILON;
+}
 
 function receiptDateStr(tx) {
   if (!tx) return "";
@@ -262,7 +267,18 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3">{displayTxDate(x)}</td>
                   <td className="px-4 py-3">{x.customer_name || "—"}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
-                  <td className="px-4 py-3 capitalize">{x.status}</td>
+                  <td className="px-4 py-3">
+                    {x.status === "completed" && hasOutstandingReceivable(x) ? (
+                      <div>
+                        <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
+                          belum lunas
+                        </span>
+                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Sisa piutang {formatIDR(x.receivable_balance)}</p>
+                      </div>
+                    ) : (
+                      <span className="capitalize">{x.status}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">
                       <button
@@ -335,6 +351,20 @@ export default function TransactionsPage() {
         {!detailLoading && detail && (
           <div className="space-y-4">
             <div className="grid gap-2 text-sm md:grid-cols-2">
+              <p>
+                <span className="text-slate-500">Status transaksi</span>
+                <br />
+                <span className="font-medium capitalize">{detail.status}</span>
+              </p>
+              {detail.status === "completed" && (
+                <p>
+                  <span className="text-slate-500">Status pembayaran</span>
+                  <br />
+                  <span className={`font-medium ${hasOutstandingReceivable(detail) ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
+                    {hasOutstandingReceivable(detail) ? "Belum lunas (ada piutang)" : "Lunas"}
+                  </span>
+                </p>
+              )}
               <p>
                 <span className="text-slate-500">Waktu sistem</span>
                 <br />
@@ -417,6 +447,12 @@ export default function TransactionsPage() {
                   <span>Dibayar</span>
                   <span>{formatIDR(detail.paid_amount)}</span>
                 </div>
+                {hasOutstandingReceivable(detail) && (
+                  <div className="flex justify-end gap-4 text-amber-700 dark:text-amber-300">
+                    <span>Sisa piutang</span>
+                    <span>{formatIDR(detail.receivable_balance)}</span>
+                  </div>
+                )}
                 {Number(detail.change_amount) > 0 && (
                   <div className="flex justify-end gap-4 text-emerald-600">
                     <span>Kembalian</span>
