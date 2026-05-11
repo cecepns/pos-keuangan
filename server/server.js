@@ -1202,6 +1202,10 @@ app.get(
       where += " AND COALESCE(t.sale_date, DATE(t.created_at)) <= ?";
       params.push(req.query.to);
     }
+    if (String(req.query.owing || "") === "1") {
+      where +=
+        " AND t.status='completed' AND COALESCE((SELECT SUM(r3.balance) FROM receivables r3 WHERE r3.transaction_id = t.id), 0) > 0.015";
+    }
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS t.*, u.name AS cashier_name, c.name AS customer_name,
               COALESCE((SELECT SUM(r.balance) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_balance
@@ -1237,7 +1241,11 @@ app.get(
     if (!tx.length) return res.status(404).json({ error: "Not found" });
     const [items] = await pool.query(`SELECT * FROM transaction_items WHERE transaction_id=?`, [req.params.id]);
     const [pays] = await pool.query(`SELECT * FROM transaction_payments WHERE transaction_id=?`, [req.params.id]);
-    res.json({ ...tx[0], items, payments: pays });
+    const [receivable_lines] = await pool.query(
+      `SELECT id, amount, paid_amount, balance, status, due_date FROM receivables WHERE transaction_id=? ORDER BY id`,
+      [req.params.id]
+    );
+    res.json({ ...tx[0], items, payments: pays, receivable_lines });
   })
 );
 
@@ -1619,16 +1627,21 @@ app.get(
 app.post(
   "/api/receivables/:id/pay",
   requireAuth,
-  ownerOrAdmin,
+  kasirOrAdmin,
   asyncHandler(async (req, res) => {
     const amt = Number(req.body.amount);
     const cash_account_id = req.body.cash_account_id;
+    if (!Number.isFinite(amt) || amt <= 0)
+      return res.status(400).json({ error: "Jumlah pembayaran tidak valid" });
+    if (!cash_account_id) return res.status(400).json({ error: "Rekening kas wajib dipilih" });
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
       const [r] = await conn.query(`SELECT * FROM receivables WHERE id=? FOR UPDATE`, [req.params.id]);
       if (!r.length) throw new Error("Not found");
       const row = r[0];
+      const balNow = Number(row.balance);
+      if (amt > balNow + 0.02) throw new Error("Jumlah melebihi sisa piutang");
       const newPaid = Number(row.paid_amount) + amt;
       const bal = Number(row.amount) - newPaid;
       await conn.query(`UPDATE receivables SET paid_amount=?, balance=?, status=? WHERE id=?`, [
@@ -1637,14 +1650,12 @@ app.post(
         bal <= 0 ? "paid" : "partial",
         req.params.id,
       ]);
-      if (cash_account_id) {
-        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, cash_account_id]);
-        await conn.query(
-          `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
-           VALUES (?,?,?,?,CURDATE(),?)`,
-          [cash_account_id, "in", amt, `Pelunasan piutang #${req.params.id}`, req.user.id]
-        );
-      }
+      await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, cash_account_id]);
+      await conn.query(
+        `INSERT INTO cash_flows (cash_account_id, type, amount, description, flow_date, created_by)
+         VALUES (?,?,?,?,CURDATE(),?)`,
+        [cash_account_id, "in", amt, `Pelunasan piutang #${req.params.id}`, req.user.id]
+      );
       await conn.query(
         `INSERT INTO installment_payments (receivable_id, amount, payment_date, cash_account_id) VALUES (?,?,CURDATE(),?)`,
         [req.params.id, amt, cash_account_id]
