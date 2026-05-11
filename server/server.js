@@ -1292,6 +1292,10 @@ app.get(
       const qq = `%${q}%`;
       params.push(qq, qq);
     }
+    const includeInactive = String(req.query.all || "") === "1" || String(req.query.all || "") === "true";
+    if (!includeInactive) {
+      where += " AND COALESCE(is_active,1)=1";
+    }
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS * FROM cash_accounts ${where} ORDER BY id LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -1304,15 +1308,50 @@ app.get(
 app.post(
   "/api/cash-accounts",
   requireAuth,
-  requireRoles("admin"),
+  requireRoles("admin", "owner"),
   asyncHandler(async (req, res) => {
     const b = req.body;
-    const [r] = await pool.query(`INSERT INTO cash_accounts (name, type, balance) VALUES (?,?,?)`, [
-      b.name,
-      b.type || "kas",
+    const type = ["kas", "bank", "ewallet"].includes(String(b.type)) ? b.type : "kas";
+    const [r] = await pool.query(`INSERT INTO cash_accounts (name, type, balance, is_active) VALUES (?,?,?,1)`, [
+      String(b.name || "").trim() || "Rekening baru",
+      type,
       Number(b.balance || 0),
     ]);
     res.status(201).json({ id: r.insertId });
+  })
+);
+
+app.put(
+  "/api/cash-accounts/:id",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const b = req.body;
+    const [rows] = await pool.query(`SELECT id FROM cash_accounts WHERE id=?`, [id]);
+    if (!rows.length) return res.status(404).json({ error: "Akun tidak ada" });
+    const type = ["kas", "bank", "ewallet"].includes(String(b.type)) ? b.type : "kas";
+    const isAct = b.is_active === false || b.is_active === 0 || String(b.is_active) === "0" ? 0 : 1;
+    await pool.query(`UPDATE cash_accounts SET name=?, type=?, is_active=? WHERE id=?`, [
+      String(b.name || "").trim() || "Tanpa nama",
+      type,
+      isAct,
+      id,
+    ]);
+    res.json({ ok: true });
+  })
+);
+
+app.delete(
+  "/api/cash-accounts/:id",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    const [rows] = await pool.query(`SELECT id FROM cash_accounts WHERE id=?`, [id]);
+    if (!rows.length) return res.status(404).json({ error: "Akun tidak ada" });
+    await pool.query(`UPDATE cash_accounts SET is_active=0 WHERE id=?`, [id]);
+    res.json({ ok: true });
   })
 );
 
