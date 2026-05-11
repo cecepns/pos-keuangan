@@ -23,6 +23,7 @@ import { Modal } from "../components/Modal";
 import { PageStack } from "../components/TableCard";
 import { buildThermalReceiptHtml, buildReceiptWhatsAppText, normalizeWhatsAppPhone } from "../utils/receipt";
 import { parseOptionalFloat, parseOptionalInt } from "../utils/numericInput";
+import { uploadSrc } from "../utils/uploadUrl";
 
 const PRODUCT_PAGE_SIZE = 48;
 const POS_DRAFT_KEY = "pos-keuangan-draft-v1";
@@ -646,17 +647,31 @@ export default function PosPage() {
                     type="button"
                     disabled={left <= 0}
                     onClick={() => addToCart(p)}
-                    className="flex flex-col rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-soft transition hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-800 dark:bg-slate-900"
+                    className="flex w-full gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-soft transition hover:border-brand-300 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-800 dark:bg-slate-900"
                   >
-                    <span className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">{p.name}</span>
-                    <span className="text-xs text-slate-500">{p.sku}</span>
-                    <span className="mt-1 text-brand-700 dark:text-brand-300">{formatIDR(p.sell_price)}</span>
-                    <span className={`text-xs ${left <= 0 ? "text-red-500" : "text-slate-400"}`}>
-                      Tersisa: {left}
-                      {(reservedByProduct[p.id] || 0) > 0 ? (
-                        <span className="text-slate-500"> / gudang {p.stock}</span>
-                      ) : null}
-                    </span>
+                    <div className="min-w-0 flex-1 flex flex-col">
+                      <span className="line-clamp-2 text-sm font-semibold text-slate-900 dark:text-white">{p.name}</span>
+                      <span className="text-xs text-slate-500">{p.sku}</span>
+                      <span className="mt-1 text-brand-700 dark:text-brand-300">{formatIDR(p.sell_price)}</span>
+                      <span className={`text-xs ${left <= 0 ? "text-red-500" : "text-slate-400"}`}>
+                        Tersisa: {left}
+                        {(reservedByProduct[p.id] || 0) > 0 ? (
+                          <span className="text-slate-500"> / gudang {p.stock}</span>
+                        ) : null}
+                      </span>
+                    </div>
+                    {p.image_path ? (
+                      <img
+                        src={uploadSrc(p.image_path)}
+                        alt=""
+                        className="h-20 w-20 shrink-0 self-start rounded-xl border border-slate-200 object-cover dark:border-slate-600"
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.target.style.display = "none";
+                        }}
+                      />
+                    ) : null}
                   </button>
                 );
               })}
