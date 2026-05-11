@@ -611,9 +611,6 @@ export default function PosPage() {
           </button>
         </div>
       </div>
-      <p className="text-xs text-slate-500 dark:text-slate-400">
-        Cetak dari HP/tablet: gunakan tombol Struk lalu pilih printer di dialog sistem. Untuk printer thermal Bluetooth, biasanya perlu aplikasi pembantu (mis. RawBT, Mopria, atau driver vendor) agar browser bisa mengirim ke printer; kabel USB OTG tetap paling andal.
-      </p>
 
       <div className="grid gap-4 xl:grid-cols-3">
         <div className="min-w-0 space-y-3 xl:col-span-2">
