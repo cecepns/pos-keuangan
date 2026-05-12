@@ -10,6 +10,7 @@ import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 
 export default function CustomersPage() {
   const [list, setList] = useState([]);
@@ -121,18 +122,11 @@ export default function CustomersPage() {
         )}
       </div>
 
-      <div className="flex justify-between text-sm text-slate-500">
+      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Hal {page}/{pages}
+          Hal {page} / {pages}
         </span>
-        <div className="flex gap-2">
-          <button type="button" disabled={page <= 1} className="rounded-xl border px-3 py-1" onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </button>
-          <button type="button" disabled={page >= pages} className="rounded-xl border px-3 py-1" onClick={() => setPage((p) => p + 1)}>
-            Next
-          </button>
-        </div>
+        <PaginationBar page={page} pages={pages} setPage={setPage} />
       </div>
 
       <Modal open={open} title={form.watch("id") ? "Edit pelanggan" : "Pelanggan baru"} onClose={() => setOpen(false)} wide>

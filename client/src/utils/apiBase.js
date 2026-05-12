@@ -1,5 +1,5 @@
 /** Tanpa slash di akhir */
-const DEFAULT_BASE = "https://api-inventory.isavralabel.com/pos-keuangan";
+const DEFAULT_BASE = "https://api-be.sekargumilangorchid.my.id";
 
 function normalizeBase(url) {
   return String(url || DEFAULT_BASE)

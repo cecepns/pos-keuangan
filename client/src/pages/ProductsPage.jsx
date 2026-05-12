@@ -13,6 +13,7 @@ import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 import { useThemeStore } from "../store/themeStore";
 import JsBarcode from "jsbarcode";
 import { uploadSrc } from "../utils/uploadUrl";
@@ -316,9 +317,9 @@ export default function ProductsPage() {
           <table className={`${PAGE_TABLE} min-w-[1040px] divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
             <thead className="bg-slate-50 dark:bg-slate-800/80">
               <tr>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">SKU</th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Aksi</th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Foto</th>
-                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">SKU</th>
                 <th className="min-w-[8rem] px-4 py-3 text-left font-semibold">Nama</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Beli</th>
                 <th className="whitespace-nowrap px-4 py-3 text-right font-semibold">Jual</th>
@@ -334,6 +335,7 @@ export default function ProductsPage() {
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {list.map((p) => (
                 <tr key={p.id}>
+                  <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{p.sku}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-nowrap justify-end gap-1">
                       <button type="button" className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => printBarcode(p)}>
@@ -377,7 +379,6 @@ export default function ProductsPage() {
                       <span className="text-xs text-slate-400">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{p.sku}</td>
                   <td className="px-4 py-3 font-medium">{p.name}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(p.purchase_price)}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(p.sell_price)}</td>
@@ -397,18 +398,11 @@ export default function ProductsPage() {
         )}
       </div>
 
-      <div className="flex items-center justify-between text-sm">
+      <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
         <span className="text-slate-500">
           Hal {page} / {pages} · {total} produk
         </span>
-        <div className="flex gap-2">
-          <button type="button" disabled={page <= 1} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </button>
-          <button type="button" disabled={page >= pages} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>
-            Next
-          </button>
-        </div>
+        <PaginationBar page={page} pages={pages} setPage={setPage} />
       </div>
 
       <Modal open={modal === "edit"} title={form.watch("id") ? "Edit produk" : "Produk baru"} onClose={() => setModal(null)} wide>

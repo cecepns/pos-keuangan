@@ -7,6 +7,7 @@ import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatDateID, formatIDR } from "../utils/format";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 
@@ -330,16 +331,11 @@ export default function OperationalExpensePage() {
             <p className="p-4 text-sm text-slate-500">Memuat…</p>
           )}
         </div>
-        <div className="mt-2 flex justify-between text-xs text-slate-500">
-          <span>Hal {page}/{pages}</span>
-          <div className="flex gap-2">
-            <button type="button" disabled={page <= 1} className="rounded border px-2 py-0.5 disabled:opacity-40" onClick={() => setPage((p) => p - 1)}>
-              Prev
-            </button>
-            <button type="button" disabled={page >= pages} className="rounded border px-2 py-0.5 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>
-              Next
-            </button>
-          </div>
+        <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Hal {page} / {pages}
+          </span>
+          <PaginationBar page={page} pages={pages} setPage={setPage} variant="compact" />
         </div>
         <p className="mt-2 text-xs text-slate-500">
           Untuk pemasukan/transfer lengkap gunakan halaman{" "}

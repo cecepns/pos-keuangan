@@ -5,6 +5,7 @@ import { PAGE_SIZE } from "../constants/pagination";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 
 export default function LowStockPage() {
   const [list, setList] = useState([]);
@@ -94,18 +95,11 @@ export default function LowStockPage() {
         <p className="text-sm text-slate-500">Tidak ada barang di bawah batas stok.</p>
       )}
 
-      <div className="flex justify-between text-sm text-slate-500">
+      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Hal {page}/{pages} · {total} entri
+          Hal {page} / {pages} · {total} entri
         </span>
-        <div className="flex gap-2">
-          <button type="button" disabled={page <= 1} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </button>
-          <button type="button" disabled={page >= pages} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>
-            Next
-          </button>
-        </div>
+        <PaginationBar page={page} pages={pages} setPage={setPage} />
       </div>
     </PageStack>
   );

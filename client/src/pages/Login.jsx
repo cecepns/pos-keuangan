@@ -62,9 +62,9 @@ export default function Login() {
             {formState.isSubmitting ? "Memproses..." : "Masuk"}
           </button>
         </form>
-        <p className="mt-6 text-center text-xs text-slate-400">
+        {/* <p className="mt-6 text-center text-xs text-slate-400">
           Demo: admin@pos.local / password · kasir@pos.local / owner@pos.local
-        </p>
+        </p> */}
       </div>
     </div>
   );

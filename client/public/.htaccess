@@ -1,0 +1,25 @@
+# Apache config untuk build production Vite React (SPA).
+# File ini ikut ke folder dist saat `npm run build` (disalin dari public/).
+#
+# Pastikan mod_rewrite aktif: `a2enmod rewrite` (Debian/Ubuntu).
+# Jika app di-deploy di subfolder (mis. https://domain.com/pos/), ubah RewriteBase:
+#   RewriteBase /pos/
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # File & folder yang ada tetap dilayani apa adanya (assets, favicon, dll.)
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+
+  # Route React Router → index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# Opsional: cache asset hashed Vite (aman untuk long-term)
+<IfModule mod_headers.c>
+  <FilesMatch "\.(js|css|woff2?|ttf|eot|svg|png|jpg|jpeg|gif|webp|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+</IfModule>

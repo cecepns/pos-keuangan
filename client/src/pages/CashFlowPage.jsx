@@ -10,6 +10,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 
 const TYPE_LABEL = { kas: "Kas", bank: "Bank", ewallet: "E-wallet" };
 
@@ -288,18 +289,11 @@ export default function CashFlowPage() {
         </table>
       </div>
 
-      <div className="flex justify-between text-sm text-slate-500">
+      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Hal {flowPage}/{flowPages} · {flowTotal} entri
+          Hal {flowPage} / {flowPages} · {flowTotal} entri
         </span>
-        <div className="flex gap-2">
-          <button type="button" disabled={flowPage <= 1} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setFlowPage((p) => p - 1)}>
-            Prev
-          </button>
-          <button type="button" disabled={flowPage >= flowPages} className="rounded-xl border px-3 py-1 disabled:opacity-40" onClick={() => setFlowPage((p) => p + 1)}>
-            Next
-          </button>
-        </div>
+        <PaginationBar page={flowPage} pages={flowPages} setPage={setFlowPage} />
       </div>
 
       <Modal open={accountsManageOpen} title="Kelola rekening kas" onClose={() => setAccountsManageOpen(false)} wide>

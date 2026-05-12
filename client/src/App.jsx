@@ -20,6 +20,7 @@ const LowStockPage = lazy(() => import("./pages/LowStockPage.jsx"));
 const OperationalExpensePage = lazy(() => import("./pages/OperationalExpensePage.jsx"));
 const CustomersPage = lazy(() => import("./pages/CustomersPage.jsx"));
 const SuppliersPage = lazy(() => import("./pages/SuppliersPage.jsx"));
+const SupplierPayablesPage = lazy(() => import("./pages/SupplierPayablesPage.jsx"));
 const TransactionsPage = lazy(() => import("./pages/TransactionsPage.jsx"));
 const CashFlowPage = lazy(() => import("./pages/CashFlowPage.jsx"));
 const ReportsPage = lazy(() => import("./pages/ReportsPage.jsx"));
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="expense-categories" element={<PermGate perm="expense_categories"><ExpenseCategoriesPage /></PermGate>} />
             <Route path="customers" element={<PermGate perm="customers"><CustomersPage /></PermGate>} />
             <Route path="suppliers" element={<PermGate perm="suppliers"><SuppliersPage /></PermGate>} />
+            <Route path="supplier-payables" element={<PermGate perm="suppliers"><SupplierPayablesPage /></PermGate>} />
             <Route path="transactions" element={<PermGate perm="transactions"><TransactionsPage /></PermGate>} />
             <Route path="cash-flow" element={<PermGate perm="cashflow"><CashFlowPage /></PermGate>} />
             <Route path="reports" element={<PermGate perm="reports"><ReportsPage /></PermGate>} />

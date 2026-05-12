@@ -9,6 +9,7 @@ import { PAGE_SIZE } from "../constants/pagination";
 import { formatIDR, formatReportDateCell } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { PAGE_TABLE, PageStackLoose, REPORT_TABLE_SCROLL, REPORT_TABLE_SCROLL_TALL } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 
 export default function ReportsPage() {
   const [from, setFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
@@ -264,18 +265,11 @@ export default function ReportsPage() {
               </tbody>
             </table>
           </div>
-          <div className="mt-2 flex justify-between text-xs text-slate-500">
+          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Hal {salesPage}/{salesPages}
+              Hal {salesPage} / {salesPages}
             </span>
-            <div className="flex gap-2">
-              <button type="button" disabled={salesPage <= 1} className="rounded border px-2 py-0.5" onClick={() => setSalesPage((p) => p - 1)}>
-                Prev
-              </button>
-              <button type="button" disabled={salesPage >= salesPages} className="rounded border px-2 py-0.5" onClick={() => setSalesPage((p) => p + 1)}>
-                Next
-              </button>
-            </div>
+            <PaginationBar page={salesPage} pages={salesPages} setPage={setSalesPage} variant="compact" />
           </div>
         </div>
 
@@ -308,18 +302,11 @@ export default function ReportsPage() {
             </tbody>
           </table>
           </div>
-          <div className="mt-2 flex justify-between text-xs text-slate-500">
+          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Hal {bestPage}/{bestPages}
+              Hal {bestPage} / {bestPages}
             </span>
-            <div className="flex gap-2">
-              <button type="button" disabled={bestPage <= 1} className="rounded border px-2 py-0.5" onClick={() => setBestPage((p) => p - 1)}>
-                Prev
-              </button>
-              <button type="button" disabled={bestPage >= bestPages} className="rounded border px-2 py-0.5" onClick={() => setBestPage((p) => p + 1)}>
-                Next
-              </button>
-            </div>
+            <PaginationBar page={bestPage} pages={bestPages} setPage={setBestPage} variant="compact" />
           </div>
         </div>
 
@@ -354,18 +341,11 @@ export default function ReportsPage() {
               </tbody>
             </table>
           </div>
-          <div className="mt-2 flex justify-between text-xs text-slate-500">
+          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
             <span>
-              Hal {marginPage}/{marginPages}
+              Hal {marginPage} / {marginPages}
             </span>
-            <div className="flex gap-2">
-              <button type="button" disabled={marginPage <= 1} className="rounded border px-2 py-0.5" onClick={() => setMarginPage((p) => p - 1)}>
-                Prev
-              </button>
-              <button type="button" disabled={marginPage >= marginPages} className="rounded border px-2 py-0.5" onClick={() => setMarginPage((p) => p + 1)}>
-                Next
-              </button>
-            </div>
+            <PaginationBar page={marginPage} pages={marginPages} setPage={setMarginPage} variant="compact" />
           </div>
         </div>
       </div>

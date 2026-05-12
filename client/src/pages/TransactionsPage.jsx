@@ -11,6 +11,7 @@ import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
 
 const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Piutang" };
@@ -454,18 +455,11 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      <div className="flex justify-between text-sm">
-        <span>
-          Hal {page}/{pages}
+      <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-slate-500 dark:text-slate-400">
+          Hal {page} / {pages}
         </span>
-        <div className="flex gap-2">
-          <button type="button" disabled={page <= 1} className="rounded-xl border px-3 py-1" onClick={() => setPage((p) => p - 1)}>
-            Prev
-          </button>
-          <button type="button" disabled={page >= pages} className="rounded-xl border px-3 py-1" onClick={() => setPage((p) => p + 1)}>
-            Next
-          </button>
-        </div>
+        <PaginationBar page={page} pages={pages} setPage={setPage} />
       </div>
 
       <Modal open={!!detailId} title={detail ? `Transaksi ${detail.invoice_no}` : "Detail transaksi"} onClose={() => setDetailId(null)} wide>

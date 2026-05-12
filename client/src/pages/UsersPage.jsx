@@ -1,10 +1,14 @@
 import { useEffect, useState, useMemo } from "react";
 import toast from "react-hot-toast";
+import { Trash2 } from "lucide-react";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
 import { Modal } from "../components/Modal";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PaginationBar } from "../components/PaginationBar";
+import { useAuthStore } from "../store/authStore";
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
@@ -15,7 +19,9 @@ export default function UsersPage() {
   const [roleTab, setRoleTab] = useState("");
   const [roleCodes, setRoleCodes] = useState([]);
   const [userModal, setUserModal] = useState(null);
+  const [delId, setDelId] = useState(null);
   const [uf, setUf] = useState({ name: "", email: "", password: "", role_id: "", store_id: "", is_active: true });
+  const currentUserId = useAuthStore((s) => s.user?.id);
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -150,27 +156,31 @@ export default function UsersPage() {
                   <td className="px-3 py-2">{u.role_name}</td>
                   <td className="px-3 py-2">{u.is_active ? "Ya" : "Tidak"}</td>
                   <td className="px-3 py-2 text-right">
-                    <button type="button" className="text-brand-600 hover:underline" onClick={() => openEdit(u)}>
-                      Edit
-                    </button>
+                    <div className="flex flex-wrap items-center justify-end gap-1">
+                      <button type="button" className="rounded-lg px-2 py-1 text-brand-600 hover:bg-slate-100 hover:underline dark:hover:bg-slate-800" onClick={() => openEdit(u)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        title={String(u.id) === String(currentUserId) ? "Tidak dapat menghapus akun sendiri" : "Hapus pengguna"}
+                        disabled={String(u.id) === String(currentUserId)}
+                        className="rounded-lg p-2 text-red-500 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 dark:hover:bg-red-950/30"
+                        onClick={() => setDelId(u.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="mt-2 flex justify-between text-sm text-slate-500">
+        <div className="mt-2 flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
           <span>
-            Hal {page}/{pages}
+            Hal {page} / {pages}
           </span>
-          <div className="flex gap-2">
-            <button type="button" disabled={page <= 1} className="rounded border px-2" onClick={() => setPage((p) => p - 1)}>
-              Prev
-            </button>
-            <button type="button" disabled={page >= pages} className="rounded border px-2" onClick={() => setPage((p) => p + 1)}>
-              Next
-            </button>
-          </div>
+          <PaginationBar page={page} pages={pages} setPage={setPage} variant="compact" />
         </div>
       </div>
 
@@ -223,6 +233,30 @@ export default function UsersPage() {
           </>
         )}
       </div>
+
+      <ConfirmDialog
+        open={!!delId}
+        title="Hapus pengguna?"
+        message="Akun login akan dihapus permanen. Tidak bisa jika pengguna punya riwayat transaksi POS."
+        danger
+        confirmText="Hapus"
+        onConfirm={async () => {
+          if (!delId) return;
+          const t = toast.loading("Menghapus...");
+          try {
+            await api.delete(`/api/users/${delId}`, { skipToast: true });
+            toast.success("Pengguna dihapus", { id: t });
+            setDelId(null);
+            loadUsers();
+          } catch (err) {
+            toast.dismiss(t);
+            const msg = err.response?.data?.error || "Gagal menghapus";
+            toast.error(msg);
+            setDelId(null);
+          }
+        }}
+        onClose={() => setDelId(null)}
+      />
 
       <Modal open={!!userModal} title={userModal === "create" ? "Pengguna baru" : "Edit pengguna"} onClose={() => setUserModal(null)}>
         <form className="space-y-3" onSubmit={saveUser}>
