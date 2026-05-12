@@ -13,6 +13,7 @@ import { TableSkeleton } from "../components/Skeleton";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
+import { useAuthStore } from "../store/authStore";
 
 const PAY_LABEL = { cash: "Tunai", transfer: "Transfer", qris: "QRIS", hutang: "Piutang" };
 const RECEIVABLE_EPSILON = 0.5;
@@ -39,6 +40,8 @@ function receiptDateStr(tx) {
 
 export default function TransactionsPage() {
   const navigate = useNavigate();
+  const roleName = useAuthStore((s) => s.user?.role_name);
+  const canAdminDeleteTx = roleName === "admin" || roleName === "owner";
   const [list, setList] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -53,6 +56,7 @@ export default function TransactionsPage() {
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [deleteDraftId, setDeleteDraftId] = useState(null);
+  const [deletePerm, setDeletePerm] = useState(null);
   const [cashAccounts, setCashAccounts] = useState([]);
   const [payOpen, setPayOpen] = useState(false);
   const [payLoading, setPayLoading] = useState(false);
@@ -104,6 +108,29 @@ export default function TransactionsPage() {
       load();
     } catch {
       toast.dismiss(t);
+    }
+  }
+
+  function canPermanentDelete(tx) {
+    if (!canAdminDeleteTx) return false;
+    if (tx.status === "refunded") return true;
+    if (tx.status === "completed" && !hasOutstandingReceivable(tx)) return true;
+    return false;
+  }
+
+  async function deletePermanent() {
+    if (!deletePerm?.id) return;
+    const t = toast.loading("Menghapus transaksi…");
+    try {
+      await api.delete(`/api/transactions/${deletePerm.id}`, { skipToast: true });
+      toast.success("Transaksi dihapus", { id: t });
+      if (detailId === deletePerm.id) setDetailId(null);
+      setDeletePerm(null);
+      load();
+    } catch (err) {
+      toast.dismiss(t);
+      toast.error(err.response?.data?.error || "Gagal menghapus");
+      setDeletePerm(null);
     }
   }
 
@@ -280,6 +307,7 @@ export default function TransactionsPage() {
         <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Transaksi</h1>
         <p className="text-sm text-slate-500">
           Filter dan detail transaksi. Sisa piutang: klik ikon dompet untuk pelunasan (DP / cicilan).
+          {canAdminDeleteTx ? " Admin/owner: hapus permanen untuk transaksi selesai (tanpa sisa piutang) atau yang sudah refund." : ""}
         </p>
       </div>
 
@@ -422,6 +450,23 @@ export default function TransactionsPage() {
                           onClick={() => setRefundId(x.id)}
                         >
                           <Undo2 className="h-4 w-4" />
+                        </button>
+                      )}
+                      {canPermanentDelete(x) && (
+                        <button
+                          type="button"
+                          className="rounded-lg p-2 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                          title="Hapus permanen (admin)"
+                          aria-label="Hapus transaksi permanen"
+                          onClick={() =>
+                            setDeletePerm({
+                              id: x.id,
+                              invoice_no: x.invoice_no,
+                              status: x.status,
+                            })
+                          }
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       )}
                       {(x.status === "draft" || x.status === "hold") && (
@@ -584,6 +629,21 @@ export default function TransactionsPage() {
               </div>
             </div>
             <div className="flex flex-wrap justify-end gap-2">
+              {canPermanentDelete(detail) && (
+                <button
+                  type="button"
+                  className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
+                  onClick={() =>
+                    setDeletePerm({
+                      id: detail.id,
+                      invoice_no: detail.invoice_no,
+                      status: detail.status,
+                    })
+                  }
+                >
+                  Hapus permanen
+                </button>
+              )}
               <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setDetailId(null)}>
                 Tutup
               </button>
@@ -623,6 +683,20 @@ export default function TransactionsPage() {
         confirmText="Hapus"
         onConfirm={deleteDraftHold}
         onClose={() => setDeleteDraftId(null)}
+      />
+
+      <ConfirmDialog
+        open={!!deletePerm}
+        title="Hapus transaksi permanen?"
+        message={
+          deletePerm
+            ? `Invoice ${deletePerm.invoice_no} (${deletePerm.status}) akan dihapus dari database. Stok dan kas akan disesuaikan (bila ada). Tindakan ini tidak bisa dibatalkan.`
+            : ""
+        }
+        danger
+        confirmText="Hapus permanen"
+        onConfirm={deletePermanent}
+        onClose={() => setDeletePerm(null)}
       />
 
       <Modal
