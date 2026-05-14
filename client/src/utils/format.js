@@ -17,9 +17,27 @@ export function formatIDR(value) {
   }).format(n);
 }
 
+/** Tanggal kalender lokal YYYY-MM-DD (bukan UTC — cocok untuk `<input type="date">` & filter API). */
+export function toLocalDateStringYMD(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function formatDateID(dateStr, opts = {}) {
   if (!dateStr) return "—";
-  const d = typeof dateStr === "string" ? new Date(dateStr) : dateStr;
+  let d;
+  if (typeof dateStr === "string") {
+    const cal = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (cal) {
+      d = new Date(Number(cal[1]), Number(cal[2]) - 1, Number(cal[3]));
+    } else {
+      d = new Date(dateStr);
+    }
+  } else {
+    d = dateStr;
+  }
   if (Number.isNaN(d.getTime())) return "—";
   return new Intl.DateTimeFormat("id-ID", {
     day: "numeric",
@@ -29,15 +47,14 @@ export function formatDateID(dateStr, opts = {}) {
   }).format(d);
 }
 
-/** Tanggal dari API (ISO / Date / YYYY-MM-DD) untuk sel laporan */
+/** Tanggal dari API untuk sel laporan (DATE MySQL sering jadi ISO dengan Z — jangan ambil 10 char pertama = tanggal UTC). */
 export function formatReportDateCell(value) {
   if (value == null || value === "") return "—";
-  const s = String(value);
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return formatDateID(m[1]);
-  const d = new Date(s);
+  const s = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return formatDateID(s);
+  const d = value instanceof Date ? value : new Date(s);
   if (Number.isNaN(d.getTime())) return s;
-  return formatDateID(d.toISOString().slice(0, 10));
+  return formatDateID(toLocalDateStringYMD(d));
 }
 
 export function formatDateTimeID(dateStr) {

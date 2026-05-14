@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
 import { Pencil, Plus, UserX } from "lucide-react";
@@ -14,10 +14,23 @@ import { PaginationBar } from "../components/PaginationBar";
 
 const TYPE_LABEL = { kas: "Kas", bank: "Bank", ewallet: "E-wallet" };
 
+function parseDateRange(dari, sampai) {
+  const d = String(dari ?? "").trim();
+  const s = String(sampai ?? "").trim();
+  if (!d && !s) return null;
+  let from = d || s;
+  let to = s || d;
+  if (from > to) [from, to] = [to, from];
+  return { from, to };
+}
+
 export default function CashFlowPage() {
   const [rows, setRows] = useState([]);
   const [flowTotal, setFlowTotal] = useState(0);
   const [flowPage, setFlowPage] = useState(1);
+  const [tanggalDari, setTanggalDari] = useState("");
+  const [tanggalSampai, setTanggalSampai] = useState("");
+  const [accountsLoading, setAccountsLoading] = useState(false);
   const [qInput, setQInput] = useState("");
   const dq = useDebouncedValue(qInput, 350);
   const [accounts, setAccounts] = useState([]);
@@ -28,6 +41,26 @@ export default function CashFlowPage() {
   const [managedAccounts, setManagedAccounts] = useState([]);
   const [accountEditor, setAccountEditor] = useState(null);
   const [deactivateId, setDeactivateId] = useState(null);
+
+  const periodeFilter = useMemo(() => parseDateRange(tanggalDari, tanggalSampai), [tanggalDari, tanggalSampai]);
+
+  const visibleAccounts = useMemo(() => {
+    const q = dq.trim().toLowerCase();
+    if (!q) return accounts;
+    return accounts.filter((a) => String(a.name || "").toLowerCase().includes(q));
+  }, [accounts, dq]);
+
+  const totalSaldoTampil = useMemo(() => {
+    if (!visibleAccounts.length) return null;
+    if (periodeFilter && accountsLoading) return null;
+    return visibleAccounts.reduce((sum, a) => {
+      const saldo =
+        periodeFilter && Number.isFinite(Number(a.balance_for_period))
+          ? Number(a.balance_for_period)
+          : Number(a.balance);
+      return sum + (Number.isFinite(saldo) ? saldo : 0);
+    }, 0);
+  }, [visibleAccounts, periodeFilter, accountsLoading]);
 
   const form = useForm({
     defaultValues: {
@@ -44,9 +77,20 @@ export default function CashFlowPage() {
   });
 
   const reloadActiveAccounts = useCallback(async () => {
-    const acc = await fetchAllPages("/api/cash-accounts");
-    setAccounts(acc);
-  }, []);
+    setAccountsLoading(true);
+    try {
+      const extra =
+        periodeFilter != null
+          ? { mutasi_from: periodeFilter.from, mutasi_to: periodeFilter.to }
+          : {};
+      const acc = await fetchAllPages("/api/cash-accounts", extra);
+      setAccounts(acc);
+    } catch {
+      /* biarkan daftar rekening sebelumnya */
+    } finally {
+      setAccountsLoading(false);
+    }
+  }, [periodeFilter]);
 
   const refreshManagedAccounts = useCallback(async () => {
     const rows = await fetchAllPages("/api/cash-accounts", { all: 1 });
@@ -54,16 +98,19 @@ export default function CashFlowPage() {
   }, []);
 
   const loadFlows = useCallback(async () => {
-    const { data } = await api.get("/api/cash-flows", {
-      params: { q: dq, page: flowPage, limit: PAGE_SIZE },
-    });
+    const params = { q: dq, page: flowPage, limit: PAGE_SIZE };
+    if (periodeFilter) {
+      params.from = periodeFilter.from;
+      params.to = periodeFilter.to;
+    }
+    const { data } = await api.get("/api/cash-flows", { params });
     setRows(data.data || []);
     setFlowTotal(Number(data.total ?? 0));
-  }, [dq, flowPage]);
+  }, [dq, flowPage, periodeFilter]);
 
   useEffect(() => {
     setFlowPage(1);
-  }, [dq]);
+  }, [dq, tanggalDari, tanggalSampai]);
 
   useEffect(() => {
     loadFlows().catch(() => {});
@@ -238,13 +285,75 @@ export default function CashFlowPage() {
         </div>
       </div>
 
-      <input
-        type="search"
-        className="max-w-md rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
-        placeholder="Cari keterangan / akun..."
-        value={qInput}
-        onChange={(e) => setQInput(e.target.value)}
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+        <input
+          type="search"
+          className="max-w-md min-w-0 flex-1 rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+          placeholder="Cari keterangan / akun..."
+          value={qInput}
+          onChange={(e) => setQInput(e.target.value)}
+        />
+        <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <label className="mb-1 block text-xs text-slate-500">Dari tanggal</label>
+            <input
+              type="date"
+              className="rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+              value={tanggalDari}
+              onChange={(e) => setTanggalDari(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-slate-500">Sampai tanggal</label>
+            <input
+              type="date"
+              className="rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+              value={tanggalSampai}
+              onChange={(e) => setTanggalSampai(e.target.value)}
+            />
+          </div>
+          {tanggalDari || tanggalSampai ? (
+            <button
+              type="button"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200"
+              onClick={() => {
+                setTanggalDari("");
+                setTanggalSampai("");
+              }}
+            >
+              Hapus filter
+            </button>
+          ) : null}
+        </div>
+      </div>
+
+      {periodeFilter ? (
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Angka di kartu = saldo akhir <strong>{formatDateID(periodeFilter.to)}</strong> (dihitung di server pada daftar rekening saat filter tanggal dipakai). Tabel = mutasi{" "}
+          <strong>
+            {formatDateID(periodeFilter.from)} – {formatDateID(periodeFilter.to)}
+          </strong>
+          .
+        </p>
+      ) : null}
+
+      {accounts.length > 0 ? (
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          <span className="font-medium text-slate-800 dark:text-slate-200">{visibleAccounts.length}</span> rekening tampil
+          {dq.trim() ? " (nama cocok pencarian)" : ""}
+          {totalSaldoTampil != null ? (
+            <>
+              {" "}
+              · total saldo tampil: <span className="font-semibold text-slate-800 dark:text-slate-200">{formatIDR(totalSaldoTampil)}</span>
+              {periodeFilter && !accountsLoading ? (
+                <span className="text-slate-500"> (akhir {formatDateID(periodeFilter.to)})</span>
+              ) : null}
+            </>
+          ) : periodeFilter && accountsLoading ? (
+            <span className="text-slate-500"> · total saldo tampil: …</span>
+          ) : null}
+        </p>
+      ) : null}
 
       <div className="grid min-w-0 gap-3 md:grid-cols-3">
         {accounts.length === 0 && (
@@ -252,12 +361,27 @@ export default function CashFlowPage() {
             Belum ada rekening kas aktif. Buka <strong>Kelola rekening kas</strong> untuk menambah.
           </div>
         )}
-        {accounts.map((a) => (
-          <div key={a.id} className="min-w-0 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-xs text-slate-500">{a.name}</p>
-            <p className="text-xl font-bold">{formatIDR(a.balance)}</p>
+        {accounts.length > 0 && visibleAccounts.length === 0 ? (
+          <div className="md:col-span-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+            Tidak ada nama rekening yang cocok dengan pencarian. Tabel mutasi tetap memakai pencarian luas (keterangan, referensi, nama akun).
           </div>
-        ))}
+        ) : null}
+        {visibleAccounts.map((a) => {
+          const balCard =
+            periodeFilter && Number.isFinite(Number(a.balance_for_period))
+              ? Number(a.balance_for_period)
+              : null;
+          return (
+            <div key={a.id} className="min-w-0 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-xs text-slate-500">{a.name}</p>
+              <p className="text-xl font-bold">
+                {periodeFilter && accountsLoading
+                  ? "…"
+                  : formatIDR(balCard != null ? balCard : Number(a.balance))}
+              </p>
+            </div>
+          );
+        })}
       </div>
 
       <div className={PAGE_TABLE_WRAP}>

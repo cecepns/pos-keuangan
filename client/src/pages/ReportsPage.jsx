@@ -6,14 +6,17 @@ import * as XLSX from "xlsx";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatIDR, formatReportDateCell } from "../utils/format";
+import { formatIDR, formatReportDateCell, toLocalDateStringYMD } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { PAGE_TABLE, PageStackLoose, REPORT_TABLE_SCROLL, REPORT_TABLE_SCROLL_TALL } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 
 export default function ReportsPage() {
-  const [from, setFrom] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
-  const [to, setTo] = useState(new Date().toISOString().slice(0, 10));
+  const [from, setFrom] = useState(() => {
+    const n = new Date();
+    return toLocalDateStringYMD(new Date(n.getFullYear(), n.getMonth(), 1));
+  });
+  const [to, setTo] = useState(() => toLocalDateStringYMD());
 
   const [sales, setSales] = useState([]);
   const [salesTotal, setSalesTotal] = useState(0);
