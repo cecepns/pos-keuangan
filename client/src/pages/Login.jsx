@@ -32,7 +32,7 @@ export default function Login() {
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-white shadow-lg shadow-brand-600/30">
             <Leaf className="h-6 w-6" />
           </div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">SEKAR GUMILANG ORCHID</h1>
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">KING POS</h1>
           <p className="text-sm text-slate-500">Masuk untuk melanjutkan</p>
         </div>
         <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>

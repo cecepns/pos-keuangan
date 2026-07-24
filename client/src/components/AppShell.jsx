@@ -297,7 +297,7 @@ export function AppShell() {
               className="truncate text-sm font-semibold leading-tight text-slate-900 dark:text-white"
               title={sidebarTitle}
             >
-              SEKAR GUMILANG ORCHID
+              KING POS
             </div>
           </div>
           <button
