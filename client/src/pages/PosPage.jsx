@@ -125,6 +125,8 @@ export default function PosPage() {
     fetchProductPage(next, true).catch(() => {});
   }
 
+  const [allowNegativeStock, setAllowNegativeStock] = useState(false);
+
   useEffect(() => {
     api
       .get("/api/settings")
@@ -138,6 +140,7 @@ export default function PosPage() {
         });
         const tx = Number(data.tax_default || 0);
         if (!Number.isNaN(tx)) setTaxPercent(tx);
+        setAllowNegativeStock(data.allow_negative_stock === "1" || data.allow_negative_stock === "true");
       })
       .catch(() => {});
   }, []);
@@ -239,7 +242,7 @@ export default function PosPage() {
 
     const reservedBase = reservedByProduct[p.id] || 0;
     const st = Number(p.stock);
-    if (st - reservedBase < convVal) {
+    if (!allowNegativeStock && st - reservedBase < convVal) {
       toast.error("Stok tidak cukup");
       return;
     }
@@ -351,6 +354,7 @@ export default function PosPage() {
   }
 
   function lineQtyCap(c) {
+    if (allowNegativeStock) return 999999;
     const srv = liveStock(c.product_id, c.stock);
     const baseReservedByOthers = cart
       .filter((item) => item.product_id === c.product_id && item.key !== c.key)
@@ -500,7 +504,8 @@ export default function PosPage() {
   function availableOnGrid(p) {
     const st = Number(p.stock);
     const res = reservedByProduct[p.id] || 0;
-    return Math.max(0, st - res);
+    const diff = st - res;
+    return allowNegativeStock ? diff : Math.max(0, diff);
   }
 
   const cashAmt = Number(String(cashAmtStr).replace(/\D/g, "")) || 0;

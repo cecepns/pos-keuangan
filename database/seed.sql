@@ -102,7 +102,8 @@ INSERT INTO settings (`key`, value) VALUES
 ('thermal_width_mm', '80'),
 ('tax_default', '0'),
 ('currency', 'IDR'),
-('whatsapp_sender_note', 'Terima kasih atas pembelian Anda!')
+('whatsapp_sender_note', 'Terima kasih atas pembelian Anda!'),
+('allow_negative_stock', '0')
 ON DUPLICATE KEY UPDATE value=VALUES(value);
 
 INSERT INTO printers (store_id, name, connection_type, paper_width_mm, is_default) VALUES

@@ -1314,10 +1314,13 @@ async function createPosTransaction(body, userId, conn) {
   const invoice_no = generateInvoiceNo();
 
   if (status === "completed") {
+    const [setRows] = await conn.query(`SELECT value FROM settings WHERE \`key\` = 'allow_negative_stock'`);
+    const allowNegativeStock = setRows[0]?.value === "1" || setRows[0]?.value === "true";
+
     for (const lr of lineRows) {
       const [pr] = await conn.query(`SELECT stock FROM products WHERE id=? FOR UPDATE`, [lr.product_id]);
       const deductQty = lr.qty * lr.conversion_value;
-      if (pr[0].stock < deductQty) throw new Error(`Stok tidak cukup: ${lr.product_name}`);
+      if (!allowNegativeStock && pr[0].stock < deductQty) throw new Error(`Stok tidak cukup: ${lr.product_name}`);
     }
   }
 
