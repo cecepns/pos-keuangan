@@ -171,46 +171,105 @@ export default function PosPage() {
     if (c?.whatsapp) setReceiptWaPhone(String(c.whatsapp).replace(/\D/g, ""));
   }, [customerId, customers]);
 
-  function addToCart(p) {
-    const avail = availableOnGrid(p);
-    if (avail <= 0) {
-      toast.error("Stok tidak tersedia untuk keranjang");
+  const selectedCustomerObj = useMemo(() => {
+    return customers.find((c) => String(c.id) === String(customerId));
+  }, [customerId, customers]);
+
+  function getProductPrice(p, unitName, customerCategory) {
+    const defaultUnitName = String(p.unit || "PCS").toLowerCase();
+    const targetUnitName = String(unitName || defaultUnitName).toLowerCase();
+    const category = String(customerCategory || "umum").toLowerCase();
+
+    if (p.prices && p.prices.length > 0) {
+      const match = p.prices.find((pr) => {
+        const prCategory = String(pr.customer_category || "umum").toLowerCase();
+        if (targetUnitName === defaultUnitName) {
+          return prCategory === category && !pr.product_unit_id;
+        } else {
+          const u = p.units?.find((u) => String(u.unit_name).toLowerCase() === targetUnitName);
+          return prCategory === category && pr.product_unit_id === u?.id;
+        }
+      });
+      if (match) return Number(match.price);
+    }
+
+    if (targetUnitName !== defaultUnitName) {
+      const u = p.units?.find((u) => String(u.unit_name).toLowerCase() === targetUnitName);
+      if (u) return Number(u.sell_price);
+    }
+
+    return Number(p.sell_price);
+  }
+
+  function getProductPurchasePrice(p, unitName) {
+    const defaultUnitName = String(p.unit || "PCS").toLowerCase();
+    const targetUnitName = String(unitName || defaultUnitName).toLowerCase();
+    if (targetUnitName !== defaultUnitName) {
+      const u = p.units?.find((u) => String(u.unit_name).toLowerCase() === targetUnitName);
+      if (u) return Number(u.purchase_price);
+    }
+    return Number(p.purchase_price);
+  }
+
+  // Recalculate prices when customer changes
+  useEffect(() => {
+    const category = selectedCustomerObj?.category || "umum";
+    setCart((prevCart) =>
+      prevCart.map((item) => {
+        const p = products.find((x) => x.id === item.product_id);
+        if (!p) return item;
+        const newPrice = getProductPrice(p, item.unit_name, category);
+        return {
+          ...item,
+          sell_price: newPrice,
+        };
+      })
+    );
+  }, [selectedCustomerObj, products]);
+
+  function addToCart(p, selectedUnit = null) {
+    const unitName = selectedUnit ? selectedUnit.unit_name : p.unit;
+    const convVal = selectedUnit ? selectedUnit.conversion_value : 1;
+    const category = selectedCustomerObj?.category || "umum";
+    const sellPrice = getProductPrice(p, unitName, category);
+    const purchasePrice = getProductPurchasePrice(p, unitName);
+    const itemKey = `${p.id}-${unitName}`;
+
+    const reservedBase = reservedByProduct[p.id] || 0;
+    const st = Number(p.stock);
+    if (st - reservedBase < convVal) {
+      toast.error("Stok tidak cukup");
       return;
     }
-    const st = Number(p.stock);
-    const ex = cart.find((c) => c.product_id === p.id);
+
+    const ex = cart.find((c) => c.key === itemKey);
     if (ex) {
-      const cap = Math.max(
-        0,
-        liveStock(p.id, ex.stock) - ((reservedByProduct[p.id] || 0) - ex.qty)
-      );
-      if (ex.qty + 1 > cap) {
-        toast.error("Stok tidak cukup");
-        return;
-      }
-      setCart(cart.map((c) => (c.product_id === p.id ? { ...c, qty: c.qty + 1 } : c)));
+      setCart(cart.map((c) => (c.key === itemKey ? { ...c, qty: c.qty + 1 } : c)));
     } else {
       setCart([
         ...cart,
         {
+          key: itemKey,
           product_id: p.id,
           name: p.name,
-          barcode: p.barcode,
+          barcode: selectedUnit?.barcode || p.barcode,
           stock: st,
-          purchase_price: Number(p.purchase_price),
-          sell_price: Number(p.sell_price),
+          purchase_price: purchasePrice,
+          sell_price: sellPrice,
           qty: 1,
           discount_amount: 0,
+          unit_name: unitName,
+          conversion_value: convVal,
         },
       ]);
     }
-    toast.success(`${p.name} ditambahkan`);
+    toast.success(`${p.name} (${unitName}) ditambahkan`);
   }
 
-  function updateLine(id, patch) {
+  function updateLine(key, patch) {
     setCart(
       cart.map((c) => {
-        if (c.product_id !== id) return c;
+        if (c.key !== key) return c;
         let next = { ...c, ...patch };
         if (patch.qty != null) {
           const cap = lineQtyCap(c);
@@ -228,19 +287,76 @@ export default function PosPage() {
     );
   }
 
-  function removeLine(id) {
+  function removeLine(key) {
     setLineDraft((m) => {
       const next = { ...m };
-      delete next[id];
+      delete next[key];
       return next;
     });
-    setCart(cart.filter((c) => c.product_id !== id));
+    setCart(cart.filter((c) => c.key !== key));
+  }
+
+  function changeLineUnit(oldKey, newUnitName) {
+    const item = cart.find(c => c.key === oldKey);
+    if (!item) return;
+    const p = products.find(prod => prod.id === item.product_id);
+    if (!p) return;
+
+    const defaultUnitName = p.unit || "PCS";
+    const selectedUnit = p.units?.find(u => u.unit_name === newUnitName) || null;
+
+    const unitName = selectedUnit ? selectedUnit.unit_name : defaultUnitName;
+    const convVal = selectedUnit ? selectedUnit.conversion_value : 1;
+    const category = selectedCustomerObj?.category || "umum";
+    const sellPrice = getProductPrice(p, unitName, category);
+    const purchasePrice = getProductPurchasePrice(p, unitName);
+    const newKey = `${p.id}-${unitName}`;
+
+    if (newKey === oldKey) return;
+
+    // Check if newKey already exists in cart
+    const existingIndex = cart.findIndex(c => c.key === newKey);
+    if (existingIndex > -1) {
+      // Merge quantity
+      const existingItem = cart[existingIndex];
+      const newQty = existingItem.qty + item.qty;
+      setCart(
+        cart
+          .filter(c => c.key !== oldKey && c.key !== newKey)
+          .concat([{
+            ...existingItem,
+            qty: newQty
+          }])
+      );
+    } else {
+      // Update in place
+      setCart(
+        cart.map(c => {
+          if (c.key === oldKey) {
+            return {
+              ...c,
+              key: newKey,
+              unit_name: unitName,
+              conversion_value: convVal,
+              sell_price: sellPrice,
+              purchase_price: purchasePrice,
+            };
+          }
+          return c;
+        })
+      );
+    }
   }
 
   function lineQtyCap(c) {
     const srv = liveStock(c.product_id, c.stock);
-    const otherRes = (reservedByProduct[c.product_id] || 0) - c.qty;
-    return Math.max(1, Math.max(0, srv - otherRes));
+    const baseReservedByOthers = cart
+      .filter((item) => item.product_id === c.product_id && item.key !== c.key)
+      .reduce((sum, item) => sum + item.qty * (item.conversion_value || 1), 0);
+
+    const availableBaseUnits = Math.max(0, srv - baseReservedByOthers);
+    const conv = c.conversion_value || 1;
+    return Math.max(0, Math.floor(availableBaseUnits / conv));
   }
 
   const subtotal = useMemo(
@@ -449,6 +565,8 @@ export default function PosPage() {
         qty: c.qty,
         sell_price: c.sell_price,
         discount_amount: c.discount_amount || 0,
+        unit_name: c.unit_name || "PCS",
+        conversion_value: c.conversion_value || 1,
       })),
       payments: pays,
     };
@@ -595,12 +713,35 @@ export default function PosPage() {
     async (rawCode) => {
       const code = String(rawCode || "").trim();
       if (!code) return false;
-      let found = products.find((p) => p.barcode === code || p.sku === code);
+      
+      let foundUnit = null;
+      let found = products.find((p) => {
+        if (p.barcode === code || p.sku === code) return true;
+        if (p.units) {
+          const u = p.units.find((unit) => unit.barcode === code);
+          if (u) {
+            foundUnit = u;
+            return true;
+          }
+        }
+        return false;
+      });
+
       if (!found) {
         try {
           const { data } = await api.get("/api/products", { params: { q: code, limit: PAGE_SIZE, active: 1 } });
-          found =
-            (data.data || []).find((p) => p.barcode === code || p.sku === code) || data.data?.[0];
+          const list = data.data || [];
+          found = list.find((p) => {
+            if (p.barcode === code || p.sku === code) return true;
+            if (p.units) {
+              const u = p.units.find((unit) => unit.barcode === code);
+              if (u) {
+                foundUnit = u;
+                return true;
+              }
+            }
+            return false;
+          });
         } catch {
           /* */
         }
@@ -620,7 +761,7 @@ export default function PosPage() {
         }
       }
       if (found) {
-        addToCart(found);
+        addToCart(found, foundUnit);
         return true;
       }
       return false;
@@ -943,19 +1084,42 @@ export default function PosPage() {
               const gross = c.sell_price * c.qty;
               const disc = Number(c.discount_amount || 0);
               const net = gross - disc;
-              const ld = lineDraft[c.product_id] || {};
+              const ld = lineDraft[c.key] || {};
               const qtyShow = ld.qty !== undefined ? ld.qty : String(c.qty);
               const sellShow = ld.sell !== undefined ? ld.sell : String(c.sell_price);
               const discShow = ld.disc !== undefined ? ld.disc : String(Number(c.discount_amount || 0));
               const capQty = lineQtyCap(c);
               return (
-                <div key={c.product_id} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
+                <div key={c.key} className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800">
                   <div className="flex justify-between gap-2">
-                    <span className="text-base font-semibold leading-snug text-slate-900 dark:text-white">{c.name}</span>
-                    <button type="button" onClick={() => removeLine(c.product_id)} className="text-red-500">
+                    <span className="text-base font-semibold leading-snug text-slate-900 dark:text-white">
+                      {c.name}
+                      <span className="ml-1 text-xs font-normal text-slate-400">({c.unit_name})</span>
+                    </span>
+                    <button type="button" onClick={() => removeLine(c.key)} className="text-red-500">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
+                  {/* UoM Dropdown */}
+                  {(() => {
+                    const p = products.find(prod => prod.id === c.product_id);
+                    if (!p || !p.units || p.units.length === 0) return null;
+                    return (
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className="text-xs text-slate-500">Satuan:</span>
+                        <select
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+                          value={c.unit_name}
+                          onChange={(e) => changeLineUnit(c.key, e.target.value)}
+                        >
+                          <option value={p.unit}>{p.unit}</option>
+                          {p.units.map((u, ui) => (
+                            <option key={ui} value={u.unit_name}>{u.unit_name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })()}
                   {disc > 0 ? (
                     <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
                       <span className="line-through">{formatIDR(gross)}</span>{" "}
@@ -967,10 +1131,9 @@ export default function PosPage() {
                   )}
                   <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
                     <label className="font-medium text-slate-700 dark:text-slate-300">
-                      Qty (maks{" "}
-                      {capQty})
+                      Qty (maks {capQty})
                       <div className="mt-1 flex items-center gap-2">
-                        <button type="button" className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-900" onClick={() => updateLine(c.product_id, { qty: Math.max(1, c.qty - 1) })}>
+                        <button type="button" className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-900" onClick={() => updateLine(c.key, { qty: Math.max(1, c.qty - 1) })}>
                           <Minus className="h-4 w-4" />
                         </button>
                         <input
@@ -981,20 +1144,20 @@ export default function PosPage() {
                           onChange={(e) =>
                             setLineDraft((m) => ({
                               ...m,
-                              [c.product_id]: { ...(m[c.product_id] || {}), qty: e.target.value.replace(/\D/g, "").slice(0, 9) },
+                              [c.key]: { ...(m[c.key] || {}), qty: e.target.value.replace(/\D/g, "").slice(0, 9) },
                             }))
                           }
                           onBlur={() => {
-                            const rawQty = lineDraft[c.product_id]?.qty;
+                            const rawQty = lineDraft[c.key]?.qty;
                             setLineDraft((m) => {
-                              const inner = { ...(m[c.product_id] || {}) };
+                              const inner = { ...(m[c.key] || {}) };
                               delete inner.qty;
                               const next = { ...m };
-                              if (Object.keys(inner).length === 0) delete next[c.product_id];
-                              else next[c.product_id] = inner;
+                              if (Object.keys(inner).length === 0) delete next[c.key];
+                              else next[c.key] = inner;
                               return next;
                             });
-                            updateLine(c.product_id, {
+                            updateLine(c.key, {
                               qty: parseOptionalInt(rawQty, c.qty, { min: 1, max: capQty }),
                             });
                           }}
@@ -1002,7 +1165,7 @@ export default function PosPage() {
                         <button
                           type="button"
                           className="rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-600 dark:bg-slate-900"
-                          onClick={() => updateLine(c.product_id, { qty: c.qty + 1 })}
+                          onClick={() => updateLine(c.key, { qty: c.qty + 1 })}
                           disabled={c.qty >= capQty}
                         >
                           <Plus className="h-4 w-4" />
@@ -1019,21 +1182,21 @@ export default function PosPage() {
                         onChange={(e) =>
                           setLineDraft((m) => ({
                             ...m,
-                            [c.product_id]: { ...(m[c.product_id] || {}), sell: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
+                            [c.key]: { ...(m[c.key] || {}), sell: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
                           }))
                         }
                         onBlur={() => {
-                          const rawSell = lineDraft[c.product_id]?.sell;
+                          const rawSell = lineDraft[c.key]?.sell;
                           setLineDraft((m) => {
-                            const inner = { ...(m[c.product_id] || {}) };
+                            const inner = { ...(m[c.key] || {}) };
                             delete inner.sell;
                             const next = { ...m };
-                            if (Object.keys(inner).length === 0) delete next[c.product_id];
-                            else next[c.product_id] = inner;
+                            if (Object.keys(inner).length === 0) delete next[c.key];
+                            else next[c.key] = inner;
                             return next;
                           });
                           const pv = parseOptionalFloat(rawSell ?? String(c.sell_price), c.sell_price, { min: 0 });
-                          updateLine(c.product_id, { sell_price: pv });
+                          updateLine(c.key, { sell_price: pv });
                         }}
                       />
                     </label>
@@ -1047,22 +1210,22 @@ export default function PosPage() {
                         onChange={(e) =>
                           setLineDraft((m) => ({
                             ...m,
-                            [c.product_id]: { ...(m[c.product_id] || {}), disc: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
+                            [c.key]: { ...(m[c.key] || {}), disc: e.target.value.replace(/[^\d]/g, "").slice(0, 14) },
                           }))
                         }
                         onBlur={() => {
-                          const rawDisc = lineDraft[c.product_id]?.disc;
+                          const rawDisc = lineDraft[c.key]?.disc;
                           const g = c.sell_price * c.qty;
                           setLineDraft((m) => {
-                            const inner = { ...(m[c.product_id] || {}) };
+                            const inner = { ...(m[c.key] || {}) };
                             delete inner.disc;
                             const next = { ...m };
-                            if (Object.keys(inner).length === 0) delete next[c.product_id];
-                            else next[c.product_id] = inner;
+                            if (Object.keys(inner).length === 0) delete next[c.key];
+                            else next[c.key] = inner;
                             return next;
                           });
                           const dv = parseOptionalFloat(rawDisc ?? String(disc), disc, { min: 0, max: g });
-                          updateLine(c.product_id, { discount_amount: dv });
+                          updateLine(c.key, { discount_amount: dv });
                         }}
                       />
                     </label>

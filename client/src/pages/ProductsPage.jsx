@@ -138,6 +138,50 @@ export default function ProductsPage() {
     })();
   }, [refreshCategories]);
 
+  const watchUnits = form.watch("units") || [];
+  const watchPrices = form.watch("prices") || [];
+  const watchUnit = form.watch("unit") || "PCS";
+
+  const addUnit = () => {
+    const current = form.getValues("units") || [];
+    form.setValue("units", [...current, { unit_name: "", conversion_value: 1, purchase_price: 0, sell_price: 0, barcode: "" }]);
+  };
+
+  const removeUnit = (index) => {
+    const current = form.getValues("units") || [];
+    const removedUnitName = current[index]?.unit_name;
+    form.setValue("units", current.filter((_, i) => i !== index));
+    // Also remove related prices
+    if (removedUnitName) {
+      const curPrices = form.getValues("prices") || [];
+      form.setValue("prices", curPrices.filter(p => String(p.unit_name).toLowerCase() !== String(removedUnitName).toLowerCase()));
+    }
+  };
+
+  const updateUnit = (index, field, value) => {
+    const current = form.getValues("units") || [];
+    const updated = [...current];
+    updated[index][field] = value;
+    form.setValue("units", updated);
+  };
+
+  const addPrice = () => {
+    const current = form.getValues("prices") || [];
+    form.setValue("prices", [...current, { unit_name: watchUnit, customer_category: "grosir", price: 0 }]);
+  };
+
+  const removePrice = (index) => {
+    const current = form.getValues("prices") || [];
+    form.setValue("prices", current.filter((_, i) => i !== index));
+  };
+
+  const updatePrice = (index, field, value) => {
+    const current = form.getValues("prices") || [];
+    const updated = [...current];
+    updated[index][field] = value;
+    form.setValue("prices", updated);
+  };
+
   function openCreate() {
     form.reset({
       name: "",
@@ -155,12 +199,29 @@ export default function ProductsPage() {
       category_ids: [],
       is_active: true,
       image_path: "",
+      units: [],
+      prices: [],
     });
     setModal("edit");
   }
 
   function openEdit(p) {
     api.get(`/api/products/${p.id}`).then(({ data }) => {
+      const fetchedUnits = data.units || [];
+      const fetchedPrices = (data.prices || []).map((pr) => {
+        let unit_name = data.unit || "PCS";
+        if (pr.product_unit_id) {
+          const matchedUnit = fetchedUnits.find((u) => u.id === pr.product_unit_id);
+          if (matchedUnit) {
+            unit_name = matchedUnit.unit_name;
+          }
+        }
+        return {
+          ...pr,
+          unit_name
+        };
+      });
+
       form.reset({
         ...data,
         unit: data.unit || "PCS",
@@ -168,6 +229,8 @@ export default function ProductsPage() {
         brand: data.brand || "",
         supplier_id: data.supplier_id || "",
         category_ids: data.category_ids || [],
+        units: fetchedUnits,
+        prices: fetchedPrices,
       });
       setModal("edit");
     });
@@ -185,6 +248,8 @@ export default function ProductsPage() {
       unit: values.unit || "PCS",
       location: values.location || null,
       brand: values.brand || null,
+      units: values.units || [],
+      prices: values.prices || [],
     };
     if (values.id) {
       if (Number.isFinite(stockNum)) payload.stock = stockNum;
@@ -393,12 +458,35 @@ export default function ProductsPage() {
                   </td>
                   <td className="px-4 py-3 font-medium">{p.name}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(p.purchase_price)}</td>
-                  <td className="px-4 py-3 text-right">{formatIDR(p.sell_price)}</td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="font-semibold">{formatIDR(p.sell_price)}</div>
+                    {p.prices && p.prices.length > 0 && (
+                      <div className="text-[10px] text-slate-500 mt-1 space-y-0.5 text-left border-t pt-1 border-slate-100 dark:border-slate-800">
+                        {p.prices.map((pr, idx) => (
+                          <div key={idx} className="flex justify-between gap-2">
+                            <span className="capitalize">{pr.customer_category}:</span>
+                            <span className="font-mono">{formatIDR(pr.price)} ({pr.product_unit_id ? p.units?.find(u => u.id === pr.product_unit_id)?.unit_name : p.unit})</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right font-medium">{p.stock}</td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-700 dark:text-slate-300">
                     {Number(p.qty_sold || 0).toLocaleString("id-ID")}
                   </td>
-                  <td className="px-4 py-3">{p.unit || "PCS"}</td>
+                  <td className="px-4 py-3">
+                    <div className="font-semibold">{p.unit || "PCS"}</div>
+                    {p.units && p.units.length > 0 && (
+                      <div className="text-[10px] text-slate-500 mt-1 space-y-0.5 border-t pt-1 border-slate-100 dark:border-slate-800">
+                        {p.units.map((u, idx) => (
+                          <div key={idx} className="whitespace-nowrap">
+                            1 {u.unit_name} = {u.conversion_value} {p.unit} ({formatIDR(u.sell_price)})
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-400">{p.categories || "—"}</td>
                   <td className="px-4 py-3 text-xs">{p.location || "—"}</td>
                   <td className="px-4 py-3 text-xs">{p.brand || "—"}</td>
@@ -513,6 +601,160 @@ export default function ProductsPage() {
               </button>
             </div>
           ) : null}
+          {/* Section: Multi Satuan */}
+          <div className="md:col-span-2 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">Multi Satuan (Satuan Tambahan)</h3>
+              <button
+                type="button"
+                onClick={addUnit}
+                className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 dark:border-brand-900/50 dark:bg-brand-950/20 dark:text-brand-300"
+              >
+                + Tambah Satuan
+              </button>
+            </div>
+            {watchUnits.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Belum ada satuan tambahan. Hanya menggunakan satuan dasar ({watchUnit}).</p>
+            ) : (
+              <div className="space-y-3">
+                {watchUnits.map((u, index) => (
+                  <div key={index} className="grid grid-cols-2 md:grid-cols-5 gap-2 items-end border border-slate-100 dark:border-slate-800 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-900/30">
+                    <div>
+                      <label className="text-[10px] text-slate-500">Nama Satuan</label>
+                      <input
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        placeholder="Contoh: BOX, DUS"
+                        value={u.unit_name}
+                        onChange={(e) => updateUnit(index, "unit_name", e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Nilai Konversi ke {watchUnit}</label>
+                      <input
+                        type="number"
+                        min="1"
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={u.conversion_value}
+                        onChange={(e) => updateUnit(index, "conversion_value", Number(e.target.value))}
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Harga Beli Satuan</label>
+                      <input
+                        type="number"
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={u.purchase_price}
+                        onChange={(e) => updateUnit(index, "purchase_price", Number(e.target.value))}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Harga Jual Satuan</label>
+                      <input
+                        type="number"
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={u.sell_price}
+                        onChange={(e) => updateUnit(index, "sell_price", Number(e.target.value))}
+                      />
+                    </div>
+                    <div className="flex items-center gap-1 col-span-2 md:col-span-1">
+                      <div className="flex-1">
+                        <label className="text-[10px] text-slate-500">Barcode Satuan</label>
+                        <input
+                          className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                          placeholder="Barcode khusus"
+                          value={u.barcode || ""}
+                          onChange={(e) => updateUnit(index, "barcode", e.target.value)}
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => removeUnit(index)}
+                        className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 mt-4"
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section: Multi Harga */}
+          <div className="md:col-span-2 border-t border-slate-100 dark:border-slate-800 pt-4 mt-2">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-slate-800 dark:text-slate-200 text-sm">Multi Harga (Harga Kategori Pelanggan)</h3>
+              <button
+                type="button"
+                onClick={addPrice}
+                className="rounded-lg border border-brand-200 bg-brand-50 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 dark:border-brand-900/50 dark:bg-brand-950/20 dark:text-brand-300"
+              >
+                + Tambah Harga Kategori
+              </button>
+            </div>
+            {watchPrices.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Belum ada harga khusus berdasarkan kategori pelanggan.</p>
+            ) : (
+              <div className="space-y-3">
+                {watchPrices.map((p, index) => (
+                  <div key={index} className="grid grid-cols-3 md:grid-cols-4 gap-2 items-end border border-slate-100 dark:border-slate-800 p-3 rounded-xl bg-slate-50/50 dark:bg-slate-900/30">
+                    <div>
+                      <label className="text-[10px] text-slate-500">Satuan</label>
+                      <select
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={p.unit_name}
+                        onChange={(e) => updatePrice(index, "unit_name", e.target.value)}
+                        required
+                      >
+                        <option value={watchUnit}>{watchUnit} (Dasar)</option>
+                        {watchUnits.map((u, ui) => u.unit_name && (
+                          <option key={ui} value={u.unit_name}>{u.unit_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Kategori Pelanggan</label>
+                      <select
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={p.customer_category}
+                        onChange={(e) => updatePrice(index, "customer_category", e.target.value)}
+                        required
+                      >
+                        <option value="umum">Umum</option>
+                        <option value="member">Member</option>
+                        <option value="grosir">Grosir</option>
+                        <option value="wholesale">Wholesale</option>
+                        <option value="retail">Retail</option>
+                        <option value="institusi">Institusi</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500">Harga Jual Khusus</label>
+                      <input
+                        type="number"
+                        className="mt-1 w-full rounded-lg border px-2 py-1 text-sm dark:bg-slate-950"
+                        value={p.price}
+                        onChange={(e) => updatePrice(index, "price", Number(e.target.value))}
+                        required
+                      />
+                    </div>
+                    <div className="flex justify-end col-span-3 md:col-span-1">
+                      <button
+                        type="button"
+                        onClick={() => removePrice(index)}
+                        className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <label className="flex items-center gap-2 md:col-span-2">
             <input type="checkbox" checked={!!form.watch("is_active")} onChange={(e) => form.setValue("is_active", e.target.checked)} />
             Aktif
