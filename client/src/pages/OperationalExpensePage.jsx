@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Pencil, Trash2 } from "lucide-react";
+import { Edit2, Trash2, FolderTree, Banknote } from "lucide-react";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatIDR, formatReportDateCell } from "../utils/format";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { ActionButton } from "../components/ActionButton";
+import { Badge } from "../components/Badge";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
@@ -83,13 +88,13 @@ export default function OperationalExpensePage() {
   async function submit(e) {
     e.preventDefault();
     const name = purposeName.trim();
-    if (!name) return toast.error("Nama keperluan wajib");
+    if (!name) return toast.error("Nama keperluan wajib diisi");
     const amt = Number(amount);
     if (!amt || amt <= 0) return toast.error("Biaya tidak valid");
     const accId = Number(cashAccountId || accounts[0]?.id);
     if (!accId) return toast.error("Belum ada rekening kas");
     const desc = keterangan.trim() ? `${name} — ${keterangan.trim()}` : name;
-    const t = toast.loading("Menyimpan...");
+    const t = toast.loading("Menyimpan pengeluaran...");
     try {
       await api.post("/api/cash-flows", {
         type: "out",
@@ -99,7 +104,7 @@ export default function OperationalExpensePage() {
         description: desc,
         flow_date: flowDate,
       });
-      toast.success("Pengeluaran tercatat", { id: t });
+      toast.success("Pengeluaran berhasil dicatat", { id: t });
       setPurposeName("");
       setAmount("");
       setKeterangan("");
@@ -135,13 +140,13 @@ export default function OperationalExpensePage() {
     e.preventDefault();
     if (!editRow) return;
     const name = editPurpose.trim();
-    if (!name) return toast.error("Nama keperluan wajib");
+    if (!name) return toast.error("Nama keperluan wajib diisi");
     const amt = Number(editAmount);
     if (!amt || amt <= 0) return toast.error("Biaya tidak valid");
     const accId = Number(editCashAccountId || accounts[0]?.id);
     if (!accId) return toast.error("Belum ada rekening kas");
     const desc = editKeterangan.trim() ? `${name} — ${editKeterangan.trim()}` : name;
-    const t = toast.loading("Menyimpan...");
+    const t = toast.loading("Menyimpan perubahan...");
     try {
       await api.put(`/api/cash-flows/${editRow.id}`, {
         cash_account_id: accId,
@@ -150,7 +155,7 @@ export default function OperationalExpensePage() {
         description: desc,
         flow_date: editFlowDate,
       });
-      toast.success("Diperbarui", { id: t });
+      toast.success("Pengeluaran berhasil diperbarui", { id: t });
       setEditRow(null);
       loadRecent();
       const acc = await fetchAllPages("/api/cash-accounts");
@@ -165,7 +170,7 @@ export default function OperationalExpensePage() {
     const t = toast.loading("Menghapus...");
     try {
       await api.delete(`/api/cash-flows/${deleteId}`);
-      toast.success("Pengeluaran dihapus", { id: t });
+      toast.success("Pengeluaran berhasil dihapus", { id: t });
       setDeleteId(null);
       refreshPreview();
       loadRecent();
@@ -180,144 +185,155 @@ export default function OperationalExpensePage() {
 
   return (
     <PageStack>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Pengeluaran operasional</h1>
-          <p className="text-sm text-slate-500">Dicatat ke kas (keluar) dengan kategori biaya</p>
-        </div>
-        <Link
-          to="/app/expense-categories"
-          className="inline-flex w-fit rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-800 dark:border-slate-600 dark:text-white"
-        >
-          Kelola kategori pengeluaran
-        </Link>
-      </div>
-
-      <form
-        onSubmit={submit}
-        className="max-w-2xl space-y-4 rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900"
+      <PageHeader
+        title="Pengeluaran Operasional"
+        subtitle="Pencatatan beban & biaya operasional ke akun kas"
       >
-        <div>
-          <label className="text-xs text-slate-500">Kode (pratinjau)</label>
-          <input readOnly className="mt-1 w-full rounded-xl border bg-slate-50 px-3 py-2 font-mono dark:bg-slate-950" value={nextCode} />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Akun kas</label>
-          <select
-            className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-            value={cashAccountId || ""}
-            onChange={(e) => setCashAccountId(e.target.value)}
-          >
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name} ({formatIDR(a.balance)})
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Nama keperluan</label>
-          <input
-            className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-            value={purposeName}
-            onChange={(e) => setPurposeName(e.target.value)}
-            placeholder="Mis. Bayar listrik toko"
-          />
-        </div>
-        <div>
-          <label className="text-xs text-slate-500">Jenis pengeluaran</label>
-          <select
-            className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-            value={expenseCategoryId}
-            onChange={(e) => setExpenseCategoryId(e.target.value)}
-          >
-            <option value="">— Pilih —</option>
-            {expenseCats.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <Link to="/app/expense-categories">
+          <ActionButton variant="secondary">
+            <FolderTree className="h-4 w-4" /> Kategori Pengeluaran
+          </ActionButton>
+        </Link>
+      </PageHeader>
+
+      <form onSubmit={submit} className="card max-w-2xl space-y-4 p-5">
+        <h2 className="text-sm font-semibold text-slate-900 dark:text-white">Form Input Pengeluaran</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <label className="text-xs text-slate-500">Biaya</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kode Bukti (Pratinjau)</label>
+            <input readOnly className="input-base mt-1.5 bg-slate-100/70 font-mono text-slate-500 dark:bg-slate-900" value={nextCode} />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Sumber Rekening Kas</label>
+            <select
+              className="input-base mt-1.5"
+              value={cashAccountId || ""}
+              onChange={(e) => setCashAccountId(e.target.value)}
+            >
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} ({formatIDR(a.balance)})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Keperluan</label>
+            <input
+              className="input-base mt-1.5"
+              value={purposeName}
+              onChange={(e) => setPurposeName(e.target.value)}
+              placeholder="misal: Bayar Listrik Toko"
+            />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Jenis Kategori Pengeluaran</label>
+            <select
+              className="input-base mt-1.5"
+              value={expenseCategoryId}
+              onChange={(e) => setExpenseCategoryId(e.target.value)}
+            >
+              <option value="">— Pilih Kategori —</option>
+              {expenseCats.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nominal Biaya (Rp)</label>
             <input
               type="text"
               inputMode="numeric"
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5 font-mono"
               value={amount}
               onChange={(e) => setAmount(e.target.value.replace(/\D/g, "").slice(0, 14))}
               placeholder="0"
             />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Tanggal</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Tanggal Pengeluaran</label>
             <input
               type="date"
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={flowDate}
               onChange={(e) => setFlowDate(e.target.value)}
             />
           </div>
         </div>
+
         <div>
-          <label className="text-xs text-slate-500">Keterangan</label>
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Keterangan Tambahan</label>
           <input
-            className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+            className="input-base mt-1.5"
             value={keterangan}
             onChange={(e) => setKeterangan(e.target.value)}
-            placeholder="Opsional"
+            placeholder="Keterangan opsional..."
           />
         </div>
-        <button type="submit" className="rounded-xl bg-brand-600 px-6 py-3 font-semibold text-white">
-          Simpan
-        </button>
+
+        <div className="pt-1">
+          <ActionButton type="submit" variant="primary">
+            Simpan Pengeluaran
+          </ActionButton>
+        </div>
       </form>
 
-      <div>
-        <h2 className="mb-3 font-semibold text-slate-900 dark:text-white">Riwayat pengeluaran terbaru (global kas)</h2>
+      <div className="space-y-3">
+        <h2 className="text-base font-semibold text-slate-900 dark:text-white">Riwayat Pengeluaran Terbaru</h2>
+        
         <div className={PAGE_TABLE_WRAP}>
-          {!loading ? (
+          {loading ? (
+            <LoadingSpinner label="Memuat riwayat pengeluaran..." />
+          ) : rows.length === 0 ? (
+            <EmptyState
+              icon={Banknote}
+              title="Tidak ada riwayat pengeluaran"
+              message="Belum ada transaksi pengeluaran kas yang dicatat."
+            />
+          ) : (
             <table className={PAGE_TABLE}>
-              <thead className="bg-slate-50 dark:bg-slate-800/80">
+              <thead>
                 <tr>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Tanggal</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Kategori</th>
-                  <th className="px-4 py-3 text-right text-sm font-semibold">Jumlah</th>
-                  <th className="px-4 py-3 text-left text-sm font-semibold">Keterangan</th>
-                  <th className="px-4 py-3 text-right text-sm font-semibold">Aksi</th>
+                  <th className="w-32">Tanggal</th>
+                  <th>Kategori</th>
+                  <th className="text-right">Nominal</th>
+                  <th>Keterangan / Keperluan</th>
+                  <th className="w-24 text-right">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              <tbody>
                 {rows.map((r) => {
                   const trxLocked = r.reference && String(r.reference).startsWith("trx:");
                   return (
                     <tr key={r.id}>
-                      <td className="px-4 py-3">{formatReportDateCell(r.flow_date)}</td>
-                      <td className="px-4 py-3 text-sm">{r.expense_category_name || "—"}</td>
-                      <td className="px-4 py-3 text-right">{formatIDR(r.amount)}</td>
-                      <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{r.description}</td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex justify-end gap-1">
-                          {!trxLocked ? (
-                            <button
-                              type="button"
-                              className="rounded-lg p-2 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/30"
-                              title="Edit"
-                              onClick={() => openEdit(r)}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                            title="Hapus"
-                            onClick={() => setDeleteId(r.id)}
-                          >
+                      <td className="text-xs text-slate-600 dark:text-slate-400">{formatReportDateCell(r.flow_date)}</td>
+                      <td>
+                        <Badge variant="neutral">
+                          {r.expense_category_name || "—"}
+                        </Badge>
+                      </td>
+                      <td className="text-right font-mono text-xs font-semibold text-rose-600 dark:text-rose-400">
+                        {formatIDR(r.amount)}
+                      </td>
+                      <td className="text-slate-800 dark:text-slate-200">{r.description}</td>
+                      <td className="text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {!trxLocked && (
+                            <ActionButton variant="ghost-brand" size="icon" onClick={() => openEdit(r)} title="Edit">
+                              <Edit2 className="h-4 w-4" />
+                            </ActionButton>
+                          )}
+                          <ActionButton variant="ghost-danger" size="icon" onClick={() => setDeleteId(r.id)} title="Hapus">
                             <Trash2 className="h-4 w-4" />
-                          </button>
+                          </ActionButton>
                         </div>
                       </td>
                     </tr>
@@ -325,31 +341,25 @@ export default function OperationalExpensePage() {
                 })}
               </tbody>
             </table>
-          ) : (
-            <p className="p-4 text-sm text-slate-500">Memuat…</p>
           )}
         </div>
-        <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-          <span>
-            Hal {page} / {pages}
-          </span>
-          <PaginationBar page={page} pages={pages} setPage={setPage} variant="compact" />
-        </div>
-        <p className="mt-2 text-xs text-slate-500">
-          Untuk pemasukan/transfer lengkap gunakan halaman{" "}
-          <Link to="/app/cash-flow" className="text-brand-600 underline">
-            Cash flow
-          </Link>
-          .
-        </p>
+
+        {!loading && rows.length > 0 && (
+          <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              Hal {page} dari {pages} ({total} pengeluaran)
+            </span>
+            <PaginationBar page={page} pages={pages} setPage={setPage} variant="compact" />
+          </div>
+        )}
       </div>
 
-      <Modal open={!!editRow} title="Edit pengeluaran" onClose={() => setEditRow(null)} wide>
-        <form className="grid max-w-xl gap-3" onSubmit={saveEdit}>
+      <Modal open={!!editRow} title="Edit Pengeluaran Operasional" onClose={() => setEditRow(null)} wide>
+        <form className="grid max-w-xl gap-4" onSubmit={saveEdit}>
           <div>
-            <label className="text-xs text-slate-500">Akun kas</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Sumber Rekening Kas</label>
             <select
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={editCashAccountId}
               onChange={(e) => setEditCashAccountId(e.target.value)}
             >
@@ -361,21 +371,21 @@ export default function OperationalExpensePage() {
             </select>
           </div>
           <div>
-            <label className="text-xs text-slate-500">Nama keperluan</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Keperluan</label>
             <input
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={editPurpose}
               onChange={(e) => setEditPurpose(e.target.value)}
             />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Jenis pengeluaran</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Jenis Kategori Pengeluaran</label>
             <select
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={editCategoryId}
               onChange={(e) => setEditCategoryId(e.target.value)}
             >
-              <option value="">— Pilih —</option>
+              <option value="">— Pilih Kategori —</option>
               {expenseCats.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -383,51 +393,51 @@ export default function OperationalExpensePage() {
               ))}
             </select>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className="text-xs text-slate-500">Biaya</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nominal Biaya (Rp)</label>
               <input
                 type="text"
                 inputMode="numeric"
-                className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+                className="input-base mt-1.5 font-mono"
                 value={editAmount}
                 onChange={(e) => setEditAmount(e.target.value.replace(/\D/g, "").slice(0, 14))}
               />
             </div>
             <div>
-              <label className="text-xs text-slate-500">Tanggal</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Tanggal</label>
               <input
                 type="date"
-                className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+                className="input-base mt-1.5"
                 value={editFlowDate}
                 onChange={(e) => setEditFlowDate(e.target.value)}
               />
             </div>
           </div>
           <div>
-            <label className="text-xs text-slate-500">Keterangan</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Keterangan</label>
             <input
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={editKeterangan}
               onChange={(e) => setEditKeterangan(e.target.value)}
               placeholder="Opsional"
             />
           </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setEditRow(null)}>
+          <div className="flex justify-end gap-2 pt-2">
+            <ActionButton variant="secondary" onClick={() => setEditRow(null)}>
               Batal
-            </button>
-            <button type="submit" className="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white">
-              Simpan perubahan
-            </button>
+            </ActionButton>
+            <ActionButton type="submit" variant="primary">
+              Simpan Perubahan
+            </ActionButton>
           </div>
         </form>
       </Modal>
 
       <ConfirmDialog
         open={!!deleteId}
-        title="Hapus pengeluaran?"
-        message="Entri akan dihapus dan saldo kas dikembalikan sesuai jumlah ini."
+        title="Hapus Pengeluaran?"
+        message="Entri ini akan dihapus dan saldo kas terkait akan dikembalikan."
         danger
         confirmText="Hapus"
         onClose={() => setDeleteId(null)}

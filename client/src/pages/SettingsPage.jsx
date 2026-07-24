@@ -2,6 +2,8 @@ import { useEffect } from "react";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
 import api from "../api/client";
+import { PageHeader } from "../components/PageHeader";
+import { ActionButton } from "../components/ActionButton";
 
 const defaultValues = {
   store_name: "",
@@ -31,48 +33,53 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-lg space-y-4">
-      <div>
-        <h1 className="text-2xl font-bold">Pengaturan</h1>
-        <p className="text-sm text-slate-500">Toko, struk termal, dan catatan default</p>
-      </div>
-      <form className="space-y-4 rounded-2xl border bg-white p-6 shadow-soft dark:border-slate-800 dark:bg-slate-900" onSubmit={form.handleSubmit(onSubmit)}>
+    <div className="mx-auto max-w-xl space-y-5">
+      <PageHeader
+        title="Pengaturan"
+        subtitle="Toko, struk termal, dan catatan default"
+      />
+
+      <form className="card space-y-4 p-6" onSubmit={form.handleSubmit(onSubmit)}>
         <div>
-          <label className="text-xs text-slate-500">Nama toko</label>
-          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("store_name")} />
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama toko</label>
+          <input className="input-base mt-1.5" {...form.register("store_name")} />
         </div>
         <div>
-          <label className="text-xs text-slate-500">Alamat (struk)</label>
-          <textarea className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" rows={2} {...form.register("store_address")} />
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Alamat (struk)</label>
+          <textarea className="input-base mt-1.5" rows={2} {...form.register("store_address")} />
         </div>
         <div>
-          <label className="text-xs text-slate-500">Telepon / WA toko</label>
-          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("store_phone")} />
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Telepon / WA toko</label>
+          <input className="input-base mt-1.5" {...form.register("store_phone")} />
         </div>
         <div>
-          <label className="text-xs text-slate-500">Footer struk</label>
-          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("receipt_footer")} />
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Footer struk</label>
+          <input className="input-base mt-1.5" {...form.register("receipt_footer")} />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Lebar kertas termal (mm)</label>
+            <input type="number" min={58} max={110} step={1} className="input-base mt-1.5" {...form.register("thermal_width_mm")} />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Pajak default (%)</label>
+            <input className="input-base mt-1.5" {...form.register("tax_default")} />
+          </div>
         </div>
         <div>
-          <label className="text-xs text-slate-500">Lebar kertas termal (mm)</label>
-          <input type="number" min={58} max={110} step={1} className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("thermal_width_mm")} />
+          <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Catatan WhatsApp</label>
+          <textarea className="input-base mt-1.5" rows={3} {...form.register("whatsapp_sender_note")} />
         </div>
-        <div>
-          <label className="text-xs text-slate-500">Pajak default (%)</label>
-          <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("tax_default")} />
+        <div className="pt-2">
+          <ActionButton type="submit" variant="primary" size="md" className="w-full">
+            Simpan Pengaturan
+          </ActionButton>
         </div>
-        <div>
-          <label className="text-xs text-slate-500">Catatan WhatsApp</label>
-          <textarea className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" rows={3} {...form.register("whatsapp_sender_note")} />
-        </div>
-        <button type="submit" className="w-full rounded-xl bg-brand-600 py-3 font-semibold text-white">
-          Simpan
-        </button>
       </form>
 
-      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900/80 dark:text-slate-300">
+      <div className="rounded-2xl border border-slate-200/80 bg-slate-100/60 p-4 text-xs leading-relaxed text-slate-600 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-400">
         <p className="font-semibold text-slate-900 dark:text-white">Cetak & printer thermal (HP / tablet)</p>
-        <p className="mt-2 leading-relaxed">
+        <p className="mt-1">
           Browser tidak bisa memilih printer Bluetooth secara langsung seperti aplikasi native. Di POS gunakan tombol Struk → dialog cetak sistem; pilih
           aplikasi/driver thermal (mis. RawBT, PrintHand, vendor printer) jika printer hanya Bluetooth. USB OTG ke printer termal biasanya paling stabil.
         </p>

@@ -2,14 +2,18 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import toast from "react-hot-toast";
-import { Plus, Pencil, Trash2 } from "lucide-react";
+import { Plus, Edit2, Trash2, Truck, ExternalLink } from "lucide-react";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatIDR } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { TableSkeleton } from "../components/Skeleton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { SearchInput } from "../components/SearchInput";
+import { ActionButton } from "../components/ActionButton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 
@@ -46,7 +50,7 @@ export default function SuppliersPage() {
     try {
       if (v.id) await api.put(`/api/suppliers/${v.id}`, v);
       else await api.post("/api/suppliers", v);
-      toast.success("Disimpan", { id: t });
+      toast.success("Data supplier berhasil disimpan", { id: t });
       setOpen(false);
       load();
     } catch {
@@ -58,18 +62,16 @@ export default function SuppliersPage() {
 
   return (
     <PageStack>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">Supplier</h1>
-          <p className="text-sm text-slate-500">
-            Hutang supplier di kolom balance —{" "}
-            <Link to="/app/supplier-payables" className="font-medium text-brand-600 underline">
-              kelola hutang & total beli
-            </Link>
-          </p>
-        </div>
-        <button
-          type="button"
+      <PageHeader
+        title="Data Supplier"
+        subtitle={`${total} supplier terdaftar · Kelola hutang dan riwayat pembelian`}
+      >
+        <Link to="/app/supplier-payables">
+          <ActionButton variant="secondary">
+            Hutang Supplier <ExternalLink className="h-3.5 w-3.5" />
+          </ActionButton>
+        </Link>
+        <ActionButton
           onClick={() => {
             form.reset({
               name: "",
@@ -83,52 +85,57 @@ export default function SuppliersPage() {
             });
             setOpen(true);
           }}
-          className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-5 py-2.5 font-semibold text-white max-w-fit"
+          variant="primary"
         >
-          <Plus className="h-5 w-5" /> Tambah
-        </button>
-      </div>
+          <Plus className="h-4 w-4" /> Tambah Supplier
+        </ActionButton>
+      </PageHeader>
 
-      <input
-        className="max-w-md rounded-2xl border px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
-        placeholder="Cari..."
+      <SearchInput
+        placeholder="Cari nama supplier, kontak..."
         value={q}
-        onChange={(e) => {
+        onChange={(val) => {
           setPage(1);
-          setQ(e.target.value);
+          setQ(val);
         }}
       />
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={5} cols={5} />
-          </div>
+          <LoadingSpinner label="Memuat data supplier..." />
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={Truck}
+            title="Tidak ada supplier"
+            message={q ? "Tidak ada supplier yang cocok dengan kata kunci." : "Belum ada supplier terdaftar."}
+          />
         ) : (
           <table className={PAGE_TABLE}>
-            <thead className="bg-slate-50 dark:bg-slate-800/80">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left">Nama</th>
-                <th className="px-4 py-3 text-left">Kontak</th>
-                <th className="px-4 py-3 text-right">Total beli</th>
-                <th className="px-4 py-3 text-right">Hutang</th>
-                <th className="px-4 py-3 text-right">Aksi</th>
+                <th>Nama Supplier</th>
+                <th>Kontak / WhatsApp</th>
+                <th className="text-right">Total Pembelian</th>
+                <th className="text-right">Sisa Hutang</th>
+                <th className="w-28 text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+            <tbody>
               {list.map((s) => (
                 <tr key={s.id}>
-                  <td className="px-4 py-3 font-medium">{s.name}</td>
-                  <td className="px-4 py-3">{s.whatsapp || s.phone}</td>
-                  <td className="px-4 py-3 text-right">{formatIDR(s.total_purchase)}</td>
-                  <td className="px-4 py-3 text-right text-red-600">{formatIDR(s.balance_payable)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button type="button" className="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => { form.reset(s); setOpen(true); }}>
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button type="button" className="p-2 text-red-500" onClick={() => setDelId(s.id)}>
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                  <td className="font-medium text-slate-900 dark:text-white">{s.name}</td>
+                  <td className="font-mono text-xs text-slate-600 dark:text-slate-400">{s.whatsapp || s.phone || "—"}</td>
+                  <td className="text-right font-medium text-slate-800 dark:text-slate-200">{formatIDR(s.total_purchase)}</td>
+                  <td className="text-right font-medium text-red-600 dark:text-red-400">{formatIDR(s.balance_payable)}</td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <ActionButton variant="ghost-brand" size="icon" onClick={() => { form.reset(s); setOpen(true); }} title="Edit">
+                        <Edit2 className="h-4 w-4" />
+                      </ActionButton>
+                      <ActionButton variant="ghost-danger" size="icon" onClick={() => setDelId(s.id)} title="Hapus">
+                        <Trash2 className="h-4 w-4" />
+                      </ActionButton>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -137,67 +144,69 @@ export default function SuppliersPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-        <span>
-          Hal {page} / {pages}
-        </span>
-        <PaginationBar page={page} pages={pages} setPage={setPage} />
-      </div>
+      {!loading && list.length > 0 && (
+        <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Menampilkan {list.length} dari {total} supplier (Hal {page} dari {pages})
+          </span>
+          <PaginationBar page={page} pages={pages} setPage={setPage} />
+        </div>
+      )}
 
-      <Modal open={open} title={form.watch("id") ? "Edit supplier" : "Supplier baru"} onClose={() => setOpen(false)} wide>
-        <form className="grid gap-3 md:grid-cols-2" onSubmit={form.handleSubmit(onSubmit)}>
+      <Modal open={open} title={form.watch("id") ? "Edit Supplier" : "Tambah Supplier Baru"} onClose={() => setOpen(false)} wide>
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={form.handleSubmit(onSubmit)}>
           <input type="hidden" {...form.register("id")} />
           <div className="md:col-span-2">
-            <label className="text-xs text-slate-500">Nama</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("name", { required: true })} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Supplier / PT</label>
+            <input className="input-base mt-1.5" {...form.register("name", { required: true })} placeholder="Nama supplier..." />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Kontak</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("contact_name")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Kontak (Sales/PIC)</label>
+            <input className="input-base mt-1.5" {...form.register("contact_name")} placeholder="Nama PIC..." />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Telepon</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("phone")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">WhatsApp</label>
+            <input className="input-base mt-1.5" {...form.register("whatsapp")} placeholder="08..." />
           </div>
           <div>
-            <label className="text-xs text-slate-500">WhatsApp</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("whatsapp")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Telepon</label>
+            <input className="input-base mt-1.5" {...form.register("phone")} placeholder="No. telp kantor..." />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Email</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("email")} />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500">Kategori</label>
-            <input className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" {...form.register("category")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Email</label>
+            <input className="input-base mt-1.5" {...form.register("email")} placeholder="email@supplier.com" />
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-slate-500">Alamat</label>
-            <textarea className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" rows={2} {...form.register("address")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kategori Barang Supplier</label>
+            <input className="input-base mt-1.5" {...form.register("category")} placeholder="misal: Pupuk, Pot, Anggrek..." />
           </div>
           <div className="md:col-span-2">
-            <label className="text-xs text-slate-500">Catatan</label>
-            <textarea className="mt-1 w-full rounded-xl border px-3 py-2 dark:bg-slate-950" rows={2} {...form.register("notes")} />
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Alamat Kantor / Gudang</label>
+            <textarea className="input-base mt-1.5" rows={2} {...form.register("address")} />
           </div>
-          <div className="md:col-span-2 flex justify-end gap-2">
-            <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setOpen(false)}>
+          <div className="md:col-span-2">
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Catatan</label>
+            <textarea className="input-base mt-1.5" rows={2} {...form.register("notes")} />
+          </div>
+          <div className="md:col-span-2 flex justify-end gap-2 pt-2">
+            <ActionButton variant="secondary" onClick={() => setOpen(false)}>
               Batal
-            </button>
-            <button type="submit" className="rounded-xl bg-brand-600 px-6 py-2 text-white">
-              Simpan
-            </button>
+            </ActionButton>
+            <ActionButton variant="primary" type="submit">
+              Simpan Supplier
+            </ActionButton>
           </div>
         </form>
       </Modal>
 
       <ConfirmDialog
         open={!!delId}
-        title="Hapus supplier?"
-        message="Pastikan tidak ada referensi produk."
+        title="Hapus Supplier?"
+        message="Pastikan tidak ada barang atau riwayat transaksi terkait dengan supplier ini."
         danger
         onConfirm={async () => {
           await api.delete(`/api/suppliers/${delId}`);
-          toast.success("Dihapus");
+          toast.success("Supplier berhasil dihapus");
           load();
         }}
         onClose={() => setDelId(null)}

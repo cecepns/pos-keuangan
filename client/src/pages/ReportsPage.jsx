@@ -3,11 +3,17 @@ import toast from "react-hot-toast";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { FileText, Download, Printer, BarChart3 } from "lucide-react";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
 import { formatIDR, formatReportDateCell, toLocalDateStringYMD } from "../utils/format";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
+import { PageHeader } from "../components/PageHeader";
+import { SearchInput } from "../components/SearchInput";
+import { ActionButton } from "../components/ActionButton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
 import { PAGE_TABLE, PageStackLoose, REPORT_TABLE_SCROLL, REPORT_TABLE_SCROLL_TALL } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 
@@ -35,6 +41,7 @@ export default function ReportsPage() {
   const [marginPage, setMarginPage] = useState(1);
 
   const [pl, setPl] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   const loadSales = useCallback(async () => {
     const { data } = await api.get("/api/reports/sales", { params: { from, to, page: salesPage, limit: PAGE_SIZE } });
@@ -71,23 +78,16 @@ export default function ReportsPage() {
   }, [marginDq]);
 
   useEffect(() => {
-    loadSales().catch(() => toast.error("Gagal memuat penjualan"));
-  }, [loadSales]);
-
-  useEffect(() => {
-    loadBest().catch(() => {});
-  }, [loadBest]);
-
-  useEffect(() => {
-    loadMargin().catch(() => {});
-  }, [loadMargin]);
-
-  useEffect(() => {
-    api
-      .get("/api/reports/profit-loss", { params: { from, to } })
-      .then(({ data }) => setPl(data))
-      .catch(() => setPl(null));
-  }, [from, to]);
+    setLoading(true);
+    Promise.all([
+      loadSales(),
+      loadBest(),
+      loadMargin(),
+      api.get("/api/reports/profit-loss", { params: { from, to } }).then(({ data }) => setPl(data)),
+    ])
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [loadSales, loadBest, loadMargin, from, to]);
 
   async function exportPdf() {
     const allSales = await fetchAllPages("/api/reports/sales", { from, to });
@@ -102,7 +102,7 @@ export default function ReportsPage() {
       body: allSales.map((r) => [r.d, formatIDR(r.omzet), formatIDR(r.profit), String(r.trx)]),
     });
     doc.save(`laporan-penjualan-${from}-${to}.pdf`);
-    toast.success("PDF diunduh");
+    toast.success("PDF berhasil diunduh");
   }
 
   async function exportExcel() {
@@ -121,7 +121,7 @@ export default function ReportsPage() {
     const ws2 = XLSX.utils.json_to_sheet(allBest);
     XLSX.utils.book_append_sheet(wb, ws2, "BestSeller");
     XLSX.writeFile(wb, `laporan-${from}-${to}.xlsx`);
-    toast.success("Excel diunduh");
+    toast.success("Excel berhasil diunduh");
   }
 
   const salesPages = Math.max(1, Math.ceil(salesTotal / PAGE_SIZE));
@@ -130,228 +130,245 @@ export default function ReportsPage() {
 
   return (
     <PageStackLoose>
-      <div>
-        <h1 className="text-2xl font-bold">Laporan & analisis</h1>
-        <p className="text-sm text-slate-500">Filter tanggal, halaman 10 baris, ekspor mengambil semua halaman</p>
-      </div>
+      <PageHeader
+        title="Laporan & Analisis Penjualan"
+        subtitle="Analisis laba rugi, tren penjualan harian, best seller, dan margin per produk"
+      >
+        <ActionButton onClick={exportPdf} variant="secondary">
+          <FileText className="h-4 w-4" /> Export PDF
+        </ActionButton>
+        <ActionButton onClick={exportExcel} variant="secondary">
+          <Download className="h-4 w-4" /> Export Excel
+        </ActionButton>
+        <ActionButton onClick={() => window.print()} variant="primary">
+          <Printer className="h-4 w-4" /> Print Halaman
+        </ActionButton>
+      </PageHeader>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+      <div className="card flex flex-wrap items-end gap-3 p-4">
         <div>
-          <label className="text-xs text-slate-500">Dari</label>
-          <input type="date" className="mt-1 block rounded-xl border px-3 py-2 dark:bg-slate-950" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <label className="text-xs font-medium text-slate-500">Dari Tanggal</label>
+          <input type="date" className="input-base mt-1" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
         <div>
-          <label className="text-xs text-slate-500">Sampai</label>
-          <input type="date" className="mt-1 block rounded-xl border px-3 py-2 dark:bg-slate-950" value={to} onChange={(e) => setTo(e.target.value)} />
+          <label className="text-xs font-medium text-slate-500">Sampai Tanggal</label>
+          <input type="date" className="input-base mt-1" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
-        <button type="button" onClick={() => exportPdf()} className="rounded-xl bg-red-600 px-4 py-2 text-sm font-semibold text-white">
-          Export PDF
-        </button>
-        <button type="button" onClick={() => exportExcel()} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white">
-          Export Excel
-        </button>
-        <button type="button" onClick={() => window.print()} className="rounded-xl border px-4 py-2 text-sm">
-          Print halaman
-        </button>
       </div>
 
-      {pl && (
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900 print:break-inside-avoid">
-          <h2 className="mb-3 text-lg font-bold text-slate-900 dark:text-white">Laporan laba rugi</h2>
-          <p className="mb-4 text-xs text-slate-500">
-            Periode{" "}
-            {pl.from === pl.to
-              ? formatReportDateCell(pl.from)
-              : `${formatReportDateCell(pl.from)} s/d ${formatReportDateCell(pl.to)}`}{" "}
-            — penjualan dari tanggal transaksi POS; pengeluaran dari tanggal aliran kas.
-          </p>
-          <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
-              <p className="text-xs text-slate-500">Pendapatan (grand total)</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.revenue)}</p>
-            </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
-              <p className="text-xs text-slate-500">HPP / modal penjualan</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.hpp)}</p>
-            </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
-              <p className="text-xs text-slate-500">Pajak penjualan</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.tax_amount)}</p>
-            </div>
-            <div className="rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/50">
-              <p className="text-xs text-slate-500">Biaya operasional</p>
-              <p className="mt-1 text-sm font-semibold tabular-nums">{formatIDR(pl.summary.operational_expense)}</p>
-            </div>
-            <div className="rounded-xl border border-slate-100 bg-brand-50/90 px-4 py-3 dark:border-brand-900/40 dark:bg-brand-950/30">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Laba bersih (est.)</p>
-              <p className="mt-1 text-sm font-bold tabular-nums text-brand-800 dark:text-brand-200">{formatIDR(pl.summary.net_profit)}</p>
-            </div>
-          </div>
-          <div className="grid min-w-0 gap-6 lg:grid-cols-2">
-            <div className="min-w-0">
-              <h3 className="mb-2 font-semibold">Ringkasan</h3>
-              <ul className="space-y-1 text-sm text-slate-700 dark:text-slate-300">
-                <li>Laba kotor (total_profit trx): {formatIDR(pl.summary.gross_profit)}</li>
-                <li>Pendapatan net (setelah pajak): {formatIDR(pl.summary.revenue_after_tax)}</li>
-                {pl.summary.pct_gross != null && (
-                  <li>Laba kotor vs pendapatan net: {(pl.summary.pct_gross).toFixed(1)}%</li>
-                )}
-                {pl.summary.pct_net != null && (
-                  <li>Laba bersih vs pendapatan net: {(pl.summary.pct_net).toFixed(1)}%</li>
-                )}
-              </ul>
-            </div>
-            <div className="min-w-0">
-              <h3 className="mb-2 font-semibold">Pengeluaran per kategori</h3>
-              <p className="mb-2 text-xs text-slate-500">
-                Total nominal per tipe: {formatIDR(pl.summary?.expense_by_category_total ?? 0)} · Grand total biaya operasional periode:{" "}
-                {formatIDR(pl.summary?.operational_expense ?? 0)}
+      {loading ? (
+        <LoadingSpinner label="Memuat laporan..." />
+      ) : (
+        <>
+          {pl && (
+            <div className="card p-5 print:break-inside-avoid">
+              <h2 className="text-base font-bold text-slate-900 dark:text-white">Laporan Laba Rugi</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Periode{" "}
+                {pl.from === pl.to
+                  ? formatReportDateCell(pl.from)
+                  : `${formatReportDateCell(pl.from)} s/d ${formatReportDateCell(pl.to)}`}
               </p>
-              <div className={REPORT_TABLE_SCROLL}>
-                <table className={PAGE_TABLE}>
-                  <thead>
-                    <tr className="border-b">
-                      <th className="py-2 text-left">Tipe</th>
-                      <th className="py-2 text-right">Nominal</th>
-                      <th className="py-2 text-right">%</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(pl.expense_breakdown || []).map((r, i) => (
-                      <tr key={i} className="border-b border-slate-50 dark:border-slate-800">
-                        <td className="py-2">{r.expense_type}</td>
-                        <td className="py-2 text-right tabular-nums">{formatIDR(r.amount)}</td>
-                        <td className="py-2 text-right tabular-nums">{r.pct.toFixed(0)}%</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-slate-200 font-semibold dark:border-slate-600">
-                      <td className="py-2">Jumlah per kategori</td>
-                      <td className="py-2 text-right tabular-nums">{formatIDR(pl.summary?.expense_by_category_total ?? 0)}</td>
-                      <td className="py-2 text-right">100%</td>
-                    </tr>
-                    <tr className="font-bold text-brand-800 dark:text-brand-200">
-                      <td className="py-2">Grand total pengeluaran (periode)</td>
-                      <td className="py-2 text-right tabular-nums" colSpan={2}>
-                        {formatIDR(pl.summary?.operational_expense ?? 0)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/50">
+                  <p className="text-xs text-slate-500">Pendapatan (Total)</p>
+                  <p className="mt-1 font-mono text-sm font-semibold text-slate-900 dark:text-white">{formatIDR(pl.summary.revenue)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/50">
+                  <p className="text-xs text-slate-500">HPP / Modal Penjualan</p>
+                  <p className="mt-1 font-mono text-sm font-semibold text-slate-900 dark:text-white">{formatIDR(pl.summary.hpp)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/50">
+                  <p className="text-xs text-slate-500">Pajak Penjualan</p>
+                  <p className="mt-1 font-mono text-sm font-semibold text-slate-900 dark:text-white">{formatIDR(pl.summary.tax_amount)}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/50">
+                  <p className="text-xs text-slate-500">Biaya Operasional</p>
+                  <p className="mt-1 font-mono text-sm font-semibold text-rose-600 dark:text-rose-400">{formatIDR(pl.summary.operational_expense)}</p>
+                </div>
+                <div className="rounded-xl border border-brand-200 bg-brand-50/80 p-3.5 dark:border-brand-900/50 dark:bg-brand-950/30">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">Est. Laba Bersih</p>
+                  <p className="mt-1 font-mono text-sm font-bold text-brand-700 dark:text-brand-300">{formatIDR(pl.summary.net_profit)}</p>
+                </div>
+              </div>
+
+              <div className="mt-6 grid min-w-0 gap-6 lg:grid-cols-2">
+                <div className="min-w-0">
+                  <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">Ringkasan Margin</h3>
+                  <div className="space-y-2 rounded-xl border border-slate-100 p-3.5 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-300">
+                    <div className="flex justify-between">
+                      <span>Laba Kotor (Gross Profit):</span>
+                      <strong className="font-mono">{formatIDR(pl.summary.gross_profit)}</strong>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Pendapatan Net (Setelah Pajak):</span>
+                      <strong className="font-mono">{formatIDR(pl.summary.revenue_after_tax)}</strong>
+                    </div>
+                    {pl.summary.pct_gross != null && (
+                      <div className="flex justify-between">
+                        <span>Margin Laba Kotor:</span>
+                        <strong className="font-mono">{pl.summary.pct_gross.toFixed(1)}%</strong>
+                      </div>
+                    )}
+                    {pl.summary.pct_net != null && (
+                      <div className="flex justify-between">
+                        <span>Margin Laba Bersih:</span>
+                        <strong className="font-mono text-emerald-600 dark:text-emerald-400">{pl.summary.pct_net.toFixed(1)}%</strong>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="min-w-0">
+                  <h3 className="mb-2 text-sm font-semibold text-slate-800 dark:text-slate-200">Pengeluaran Per Kategori</h3>
+                  <div className={REPORT_TABLE_SCROLL}>
+                    <table className={PAGE_TABLE}>
+                      <thead>
+                        <tr>
+                          <th>Tipe Kategori</th>
+                          <th className="text-right">Nominal</th>
+                          <th className="text-right">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(pl.expense_breakdown || []).map((r, i) => (
+                          <tr key={i}>
+                            <td className="capitalize">{r.expense_type}</td>
+                            <td className="text-right font-mono text-xs">{formatIDR(r.amount)}</td>
+                            <td className="text-right font-mono text-xs">{r.pct.toFixed(0)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             </div>
+          )}
+
+          <div className="grid min-w-0 gap-6 lg:grid-cols-2 print:block">
+            {/* Penjualan Harian */}
+            <div className="card min-w-0 p-4">
+              <h3 className="mb-3 text-sm font-semibold text-slate-900 dark:text-white">Penjualan Harian</h3>
+              <div className={REPORT_TABLE_SCROLL}>
+                {sales.length === 0 ? (
+                  <EmptyState title="Tidak ada data penjualan" />
+                ) : (
+                  <table className={PAGE_TABLE}>
+                    <thead>
+                      <tr>
+                        <th>Tanggal</th>
+                        <th className="text-right">Omzet</th>
+                        <th className="text-right">Profit</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sales.map((r) => (
+                        <tr key={r.d}>
+                          <td className="whitespace-nowrap text-xs">{formatReportDateCell(r.d)}</td>
+                          <td className="text-right font-mono text-xs font-medium">{formatIDR(r.omzet)}</td>
+                          <td className="text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">{formatIDR(r.profit)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {sales.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Hal {salesPage} dari {salesPages}</span>
+                  <PaginationBar page={salesPage} pages={salesPages} setPage={setSalesPage} variant="compact" />
+                </div>
+              )}
+            </div>
+
+            {/* Best Seller */}
+            <div className="card min-w-0 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Best Seller</h3>
+              <SearchInput
+                placeholder="Cari produk best seller..."
+                value={bestQin}
+                onChange={(val) => setBestQin(val)}
+                className="mb-3 max-w-full"
+              />
+              <div className={REPORT_TABLE_SCROLL}>
+                {best.length === 0 ? (
+                  <EmptyState title="Tidak ada data" />
+                ) : (
+                  <table className={PAGE_TABLE}>
+                    <thead>
+                      <tr>
+                        <th>Nama Produk</th>
+                        <th className="text-right">Qty Terjual</th>
+                        <th className="text-right">Omzet</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {best.map((r) => (
+                        <tr key={r.id}>
+                          <td className="font-medium text-slate-900 dark:text-white">{r.name}</td>
+                          <td className="text-right font-mono text-xs">{r.qty}</td>
+                          <td className="text-right font-mono text-xs font-semibold">{formatIDR(r.revenue)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {best.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Hal {bestPage} dari {bestPages}</span>
+                  <PaginationBar page={bestPage} pages={bestPages} setPage={setBestPage} variant="compact" />
+                </div>
+              )}
+            </div>
+
+            {/* Margin Per Produk */}
+            <div className="card min-w-0 lg:col-span-2 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-slate-900 dark:text-white">Margin Per Produk (90 Hari)</h3>
+              <SearchInput
+                placeholder="Cari produk..."
+                value={marginQin}
+                onChange={(val) => setMarginQin(val)}
+                className="mb-3 max-w-md"
+              />
+              <div className={REPORT_TABLE_SCROLL_TALL}>
+                {margin.length === 0 ? (
+                  <EmptyState title="Tidak ada data margin" />
+                ) : (
+                  <table className={PAGE_TABLE}>
+                    <thead>
+                      <tr>
+                        <th>Nama Produk</th>
+                        <th className="text-right">Qty Terjual</th>
+                        <th className="text-right">Omzet Total</th>
+                        <th className="text-right">Margin Keuntungan</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {margin.map((r) => (
+                        <tr key={r.id}>
+                          <td className="font-medium text-slate-900 dark:text-white">{r.name}</td>
+                          <td className="text-right font-mono text-xs">{r.qty}</td>
+                          <td className="text-right font-mono text-xs">{formatIDR(r.revenue)}</td>
+                          <td className="text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">{formatIDR(r.margin)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {margin.length > 0 && (
+                <div className="mt-3 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+                  <span>Hal {marginPage} dari {marginPages}</span>
+                  <PaginationBar page={marginPage} pages={marginPages} setPage={setMarginPage} variant="compact" />
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        </>
       )}
-
-      <div className="grid min-w-0 gap-6 lg:grid-cols-2 print:block">
-        <div className="min-w-0 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 font-semibold">Penjualan harian</h3>
-          <div className={REPORT_TABLE_SCROLL}>
-            <table className={PAGE_TABLE}>
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 text-left">Tanggal</th>
-                  <th className="py-2 text-right">Omzet</th>
-                  <th className="py-2 text-right">Profit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sales.map((r) => (
-                  <tr key={r.d} className="border-b border-slate-50 dark:border-slate-800">
-                    <td className="py-2 whitespace-nowrap">{formatReportDateCell(r.d)}</td>
-                    <td className="py-2 text-right">{formatIDR(r.omzet)}</td>
-                    <td className="py-2 text-right">{formatIDR(r.profit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              Hal {salesPage} / {salesPages}
-            </span>
-            <PaginationBar page={salesPage} pages={salesPages} setPage={setSalesPage} variant="compact" />
-          </div>
-        </div>
-
-        <div className="min-w-0 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 font-semibold">Best seller</h3>
-          <input
-            type="search"
-            className="mb-2 w-full rounded-xl border px-3 py-2 text-sm dark:bg-slate-950"
-            placeholder="Cari produk..."
-            value={bestQin}
-            onChange={(e) => setBestQin(e.target.value)}
-          />
-          <div className={REPORT_TABLE_SCROLL}>
-          <table className={PAGE_TABLE}>
-            <thead>
-              <tr className="border-b">
-                <th className="py-2 text-left">Produk</th>
-                <th className="py-2 text-right">Qty</th>
-                <th className="py-2 text-right">Omzet</th>
-              </tr>
-            </thead>
-            <tbody>
-              {best.map((r) => (
-                <tr key={r.id} className="border-b border-slate-50 dark:border-slate-800">
-                  <td className="py-2">{r.name}</td>
-                  <td className="py-2 text-right">{r.qty}</td>
-                  <td className="py-2 text-right">{formatIDR(r.revenue)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              Hal {bestPage} / {bestPages}
-            </span>
-            <PaginationBar page={bestPage} pages={bestPages} setPage={setBestPage} variant="compact" />
-          </div>
-        </div>
-
-        <div className="min-w-0 lg:col-span-2 rounded-2xl border bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-3 font-semibold">Margin per produk (90 hari)</h3>
-          <input
-            type="search"
-            className="mb-2 max-w-md rounded-xl border px-3 py-2 text-sm dark:bg-slate-950"
-            placeholder="Cari produk..."
-            value={marginQin}
-            onChange={(e) => setMarginQin(e.target.value)}
-          />
-          <div className={REPORT_TABLE_SCROLL_TALL}>
-            <table className={PAGE_TABLE}>
-              <thead>
-                <tr className="border-b">
-                  <th className="py-2 text-left">Produk</th>
-                  <th className="py-2 text-right">Qty</th>
-                  <th className="py-2 text-right">Omzet</th>
-                  <th className="py-2 text-right">Margin</th>
-                </tr>
-              </thead>
-              <tbody>
-                {margin.map((r) => (
-                  <tr key={r.id} className="border-b border-slate-50 dark:border-slate-800">
-                    <td className="py-2">{r.name}</td>
-                    <td className="py-2 text-right">{r.qty}</td>
-                    <td className="py-2 text-right">{formatIDR(r.revenue)}</td>
-                    <td className="py-2 text-right text-emerald-600">{formatIDR(r.margin)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-2 flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              Hal {marginPage} / {marginPages}
-            </span>
-            <PaginationBar page={marginPage} pages={marginPages} setPage={setMarginPage} variant="compact" />
-          </div>
-        </div>
-      </div>
     </PageStackLoose>
   );
 }

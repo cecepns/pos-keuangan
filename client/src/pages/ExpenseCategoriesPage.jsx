@@ -1,15 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import toast from "react-hot-toast";
+import { Plus, Edit2, ArrowLeft } from "lucide-react";
 import api from "../api/client";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Modal } from "../components/Modal";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { ActionButton } from "../components/ActionButton";
+import { Badge } from "../components/Badge";
 
 const TYPES = [
   { value: "operational", label: "Operasional" },
-  { value: "alat", label: "Alat" },
-  { value: "pos", label: "POS" },
+  { value: "alat", label: "Alat / Perlengkapan" },
+  { value: "pos", label: "POS / Kasir" },
   { value: "lainnya", label: "Lainnya" },
 ];
 
@@ -49,12 +55,12 @@ export default function ExpenseCategoriesPage() {
   async function save(e) {
     e.preventDefault();
     const name = form.name.trim();
-    if (!name) return toast.error("Nama wajib");
+    if (!name) return toast.error("Nama kategori wajib diisi");
     const t = toast.loading("Menyimpan...");
     try {
       if (form.id) await api.put(`/api/expense-categories/${form.id}`, { name, type: form.type });
       else await api.post("/api/expense-categories", { name, type: form.type });
-      toast.success("Disimpan", { id: t });
+      toast.success("Kategori pengeluaran disimpan", { id: t });
       setModal(null);
       load();
     } catch {
@@ -64,45 +70,54 @@ export default function ExpenseCategoriesPage() {
 
   return (
     <PageStack>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Kategori pengeluaran</h1>
-          <p className="text-sm text-slate-500">Tambah manual untuk laporan & form pengeluaran (mis. gaji, sewa)</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            to="/app/expenses"
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium dark:border-slate-700"
-          >
-            ← Pengeluaran
-          </Link>
-          <button type="button" onClick={openCreate} className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white">
-            Tambah kategori
-          </button>
-        </div>
-      </div>
+      <PageHeader
+        title="Kategori Pengeluaran"
+        subtitle="Kategori biaya operasional (sewa, gaji, perlengkapan, dll)"
+      >
+        <Link to="/app/expenses">
+          <ActionButton variant="secondary">
+            <ArrowLeft className="h-4 w-4" /> Kembali ke Pengeluaran
+          </ActionButton>
+        </Link>
+        <ActionButton onClick={openCreate} variant="primary">
+          <Plus className="h-4 w-4" /> Tambah Kategori
+        </ActionButton>
+      </PageHeader>
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
-          <p className="p-4 text-sm text-slate-500">Memuat…</p>
+          <LoadingSpinner label="Memuat kategori pengeluaran..." />
+        ) : rows.length === 0 ? (
+          <EmptyState
+            title="Tidak ada kategori pengeluaran"
+            message="Belum ada kategori pengeluaran yang dibuat."
+          >
+            <ActionButton onClick={openCreate} variant="secondary" size="sm" className="mt-2">
+              <Plus className="h-4 w-4" /> Tambah Kategori Baru
+            </ActionButton>
+          </EmptyState>
         ) : (
           <table className={PAGE_TABLE}>
-            <thead className="bg-slate-50 dark:bg-slate-800/80">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left">Nama</th>
-                <th className="px-4 py-3 text-left">Tipe</th>
-                <th className="px-4 py-3 text-right">Aksi</th>
+                <th>Nama Kategori</th>
+                <th>Tipe</th>
+                <th className="w-24 text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-medium">{r.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{r.type || "—"}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button type="button" className="text-brand-600 hover:underline" onClick={() => openEdit(r)}>
-                      Edit
-                    </button>
+                  <td className="font-medium text-slate-900 dark:text-white">{r.name}</td>
+                  <td>
+                    <Badge variant="neutral" className="capitalize">
+                      {TYPES.find((t) => t.value === r.type)?.label || r.type || "—"}
+                    </Badge>
+                  </td>
+                  <td className="text-right">
+                    <ActionButton variant="ghost-brand" size="icon" onClick={() => openEdit(r)} title="Edit">
+                      <Edit2 className="h-4 w-4" />
+                    </ActionButton>
                   </td>
                 </tr>
               ))}
@@ -111,20 +126,21 @@ export default function ExpenseCategoriesPage() {
         )}
       </div>
 
-      <Modal open={modal === "edit"} title={form.id ? "Edit kategori" : "Kategori baru"} onClose={() => setModal(null)}>
-        <form className="space-y-3" onSubmit={save}>
+      <Modal open={modal === "edit"} title={form.id ? "Edit Kategori Pengeluaran" : "Tambah Kategori Baru"} onClose={() => setModal(null)}>
+        <form className="space-y-4" onSubmit={save}>
           <div>
-            <label className="text-xs text-slate-500">Nama</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Kategori</label>
             <input
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={form.name}
               onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+              placeholder="misal: Gaji Karyawan, Listrik & Air..."
             />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Tipe</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Tipe Pengeluaran</label>
             <select
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={form.type}
               onChange={(e) => setForm((f) => ({ ...f, type: e.target.value }))}
             >
@@ -135,31 +151,35 @@ export default function ExpenseCategoriesPage() {
               ))}
             </select>
           </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setModal(null)}>
-              Batal
-            </button>
-            <button type="submit" className="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white">
-              Simpan
-            </button>
-            {form.id ? (
-              <button type="button" className="rounded-xl border border-red-200 px-4 py-2 text-red-600" onClick={() => setDelId(form.id)}>
-                Hapus
-              </button>
-            ) : null}
+          <div className="flex justify-between items-center pt-2">
+            <div>
+              {form.id && (
+                <ActionButton type="button" variant="ghost-danger" onClick={() => setDelId(form.id)}>
+                  Hapus
+                </ActionButton>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <ActionButton type="button" variant="secondary" onClick={() => setModal(null)}>
+                Batal
+              </ActionButton>
+              <ActionButton type="submit" variant="primary">
+                Simpan
+              </ActionButton>
+            </div>
           </div>
         </form>
       </Modal>
 
       <ConfirmDialog
         open={!!delId}
-        title="Hapus kategori?"
-        message="Kategori yang sudah dipakai di aliran kas tetap aman di data historis; penghapusan hanya menghapus master kategori."
+        title="Hapus Kategori?"
+        message="Kategori yang sudah dipakai di aliran kas tetap aman di data historis."
         danger
         onClose={() => setDelId(null)}
         onConfirm={async () => {
           await api.delete(`/api/expense-categories/${delId}`);
-          toast.success("Dihapus");
+          toast.success("Kategori berhasil dihapus");
           setDelId(null);
           setModal(null);
           load();

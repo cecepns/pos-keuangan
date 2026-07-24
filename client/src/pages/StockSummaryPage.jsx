@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
-import { TableSkeleton } from "../components/Skeleton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { SearchInput } from "../components/SearchInput";
+import { ClipboardList } from "lucide-react";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 
@@ -39,49 +43,52 @@ export default function StockSummaryPage() {
 
   return (
     <PageStack>
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Data stok barang</h1>
-        <p className="text-sm text-slate-500">Ringkasan stok masuk, keluar & sisa (dari mutasi + stok saat ini)</p>
-      </div>
+      <PageHeader
+        title="Data Stok Barang"
+        subtitle="Ringkasan mutasi stok masuk, keluar, penyesuaian & sisa stok saat ini"
+      />
 
-      <input
-        className="max-w-md rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+      <SearchInput
         placeholder="Cari SKU / nama / barcode..."
         value={q}
-        onChange={(e) => {
+        onChange={(val) => {
           setPage(1);
-          setQ(e.target.value);
+          setQ(val);
         }}
       />
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={8} cols={6} />
-          </div>
+          <LoadingSpinner label="Memuat data stok..." />
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={ClipboardList}
+            title="Tidak Ada Data Stok"
+            message={q ? "Tidak ada barang yang cocok dengan kata kunci pencarian." : "Belum ada produk aktif terdaftar."}
+          />
         ) : (
           <table className={PAGE_TABLE}>
-            <thead className="bg-slate-50 dark:bg-slate-800/80">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold">SKU</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Nama</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Kategori</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold">Stok masuk</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold">Stok keluar</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold">Penyesuaian</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold">Sisa stok</th>
+                <th className="w-28">SKU</th>
+                <th>Nama Barang</th>
+                <th>Kategori</th>
+                <th className="text-right">Stok Masuk</th>
+                <th className="text-right">Stok Keluar</th>
+                <th className="text-right">Penyesuaian</th>
+                <th className="text-right">Sisa Stok</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody>
               {list.map((r) => (
                 <tr key={r.id}>
-                  <td className="px-4 py-3 font-mono text-sm">{r.sku}</td>
-                  <td className="px-4 py-3 font-medium">{r.name}</td>
-                  <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{r.categories || "—"}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{fmtInt(r.qty_in)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{fmtInt(r.qty_out)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums text-amber-700 dark:text-amber-400">{fmtInt(r.qty_adjust)}</td>
-                  <td className="px-4 py-3 text-right font-semibold tabular-nums">{fmtInt(r.balance)}</td>
+                  <td className="font-mono text-xs font-medium text-slate-600 dark:text-slate-400">{r.sku}</td>
+                  <td className="font-medium text-slate-900 dark:text-white">{r.name}</td>
+                  <td className="text-slate-600 dark:text-slate-400">{r.categories || "—"}</td>
+                  <td className="text-right font-mono text-xs text-emerald-600 dark:text-emerald-400">+{fmtInt(r.qty_in)}</td>
+                  <td className="text-right font-mono text-xs text-rose-600 dark:text-rose-400">-{fmtInt(r.qty_out)}</td>
+                  <td className="text-right font-mono text-xs text-amber-600 dark:text-amber-400">{fmtInt(r.qty_adjust)}</td>
+                  <td className="text-right font-mono text-sm font-semibold text-slate-900 dark:text-white">{fmtInt(r.balance)}</td>
                 </tr>
               ))}
             </tbody>
@@ -89,12 +96,14 @@ export default function StockSummaryPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-        <span>
-          Hal {page} / {pages} · {total} produk aktif
-        </span>
-        <PaginationBar page={page} pages={pages} setPage={setPage} />
-      </div>
+      {!loading && list.length > 0 && (
+        <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Menampilkan {list.length} dari {total} produk (Hal {page} dari {pages})
+          </span>
+          <PaginationBar page={page} pages={pages} setPage={setPage} />
+        </div>
+      )}
     </PageStack>
   );
 }

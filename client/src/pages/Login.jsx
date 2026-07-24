@@ -27,44 +27,41 @@ export default function Login() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-brand-700 via-brand-600 to-teal-500 p-6">
-      <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-soft dark:bg-slate-900">
-        <div className="mb-8 flex flex-col items-center gap-2 text-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 text-white shadow-soft">
-            <Leaf className="h-8 w-8" />
+      <div className="w-full max-w-sm animate-slide-up rounded-2xl bg-white p-7 shadow-xl dark:bg-slate-900">
+        <div className="mb-7 flex flex-col items-center gap-2 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-brand-600 text-white shadow-lg shadow-brand-600/30">
+            <Leaf className="h-6 w-6" />
           </div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">SEKAR GUMILANG ORCHID</h1>
+          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">SEKAR GUMILANG ORCHID</h1>
           <p className="text-sm text-slate-500">Masuk untuk melanjutkan</p>
         </div>
         <form className="space-y-4" onSubmit={handleSubmit(onSubmit)}>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Email</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Email</label>
             <input
               type="email"
               autoComplete="username"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none ring-brand-500 focus:ring-2 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              className="input-base"
               {...register("email", { required: true })}
             />
           </div>
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
+            <label className="mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300">Password</label>
             <input
               type="password"
               autoComplete="current-password"
-              className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-slate-900 outline-none ring-brand-500 focus:ring-2 dark:border-slate-700 dark:bg-slate-950 dark:text-white"
+              className="input-base"
               {...register("password", { required: true })}
             />
           </div>
           <button
             type="submit"
             disabled={formState.isSubmitting}
-            className="w-full rounded-xl bg-brand-600 py-3 font-semibold text-white shadow-soft transition hover:bg-brand-700 disabled:opacity-60"
+            className="w-full rounded-xl bg-brand-600 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-brand-700 disabled:opacity-60"
           >
             {formState.isSubmitting ? "Memproses..." : "Masuk"}
           </button>
         </form>
-        {/* <p className="mt-6 text-center text-xs text-slate-400">
-          Demo: admin@pos.local / password · kasir@pos.local / owner@pos.local
-        </p> */}
       </div>
     </div>
   );

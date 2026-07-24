@@ -1,4 +1,5 @@
 import clsx from "clsx";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { getPageNumberItems } from "../utils/paginationItems";
 
 /**
@@ -11,31 +12,25 @@ export function PaginationBar({ page, pages, setPage, variant = "default", class
   const items = safePages <= 1 ? [] : getPageNumberItems(safePage, safePages);
   const compact = variant === "compact";
 
-  const navBtn = compact
-    ? "rounded border border-slate-200 px-2 py-0.5 text-xs font-medium disabled:opacity-40 dark:border-slate-700"
-    : "rounded-xl border border-slate-200 px-3 py-1 text-sm disabled:opacity-40 dark:border-slate-700";
+  const navBtn = clsx(
+    "inline-flex items-center justify-center rounded-lg border border-slate-200 transition-all duration-100 disabled:opacity-30 dark:border-slate-700",
+    compact ? "h-7 w-7 text-xs" : "h-8 w-8 text-sm",
+  );
 
-  const edgeBtn = compact
-    ? "rounded border border-slate-200 px-2 py-0.5 text-xs font-medium disabled:opacity-40 dark:border-slate-700"
-    : "rounded-xl border border-slate-200 px-2.5 py-1 text-sm font-medium disabled:opacity-40 dark:border-slate-700";
+  const numBase = clsx(
+    "inline-flex items-center justify-center rounded-lg border font-medium tabular-nums transition-all duration-100 dark:border-slate-700",
+    compact ? "h-7 min-w-[1.75rem] px-1.5 text-xs" : "h-8 min-w-[2rem] px-2 text-sm",
+  );
 
-  const numBase = compact
-    ? "min-w-[1.75rem] rounded border px-1.5 py-0.5 text-xs font-medium tabular-nums dark:border-slate-700"
-    : "min-w-[2.25rem] rounded-xl border px-2.5 py-1 text-sm font-medium tabular-nums dark:border-slate-700";
+  if (safePages <= 1) return null;
 
   return (
     <div className={clsx("flex flex-wrap items-center gap-1", className)}>
-      <button
-        type="button"
-        disabled={safePage <= 1}
-        className={edgeBtn}
-        onClick={() => setPage(1)}
-        title="Halaman pertama"
-      >
-        «
+      <button type="button" disabled={safePage <= 1} className={navBtn} onClick={() => setPage(1)} title="Halaman pertama">
+        <ChevronsLeft className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
       </button>
-      <button type="button" disabled={safePage <= 1} className={navBtn} onClick={() => setPage((p) => p - 1)}>
-        Prev
+      <button type="button" disabled={safePage <= 1} className={navBtn} onClick={() => setPage((p) => p - 1)} title="Sebelumnya">
+        <ChevronLeft className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
       </button>
       {items.map((item, idx) =>
         item.type === "ellipsis" ? (
@@ -50,25 +45,19 @@ export function PaginationBar({ page, pages, setPage, variant = "default", class
               numBase,
               safePage === item.value
                 ? "border-brand-600 bg-brand-600 text-white shadow-sm"
-                : "border-slate-200 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800"
+                : "border-slate-200 bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800",
             )}
             onClick={() => setPage(item.value)}
           >
             {item.value}
           </button>
-        )
+        ),
       )}
-      <button type="button" disabled={safePage >= safePages} className={navBtn} onClick={() => setPage((p) => p + 1)}>
-        Next
+      <button type="button" disabled={safePage >= safePages} className={navBtn} onClick={() => setPage((p) => p + 1)} title="Berikutnya">
+        <ChevronRight className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
       </button>
-      <button
-        type="button"
-        disabled={safePage >= safePages}
-        className={edgeBtn}
-        onClick={() => setPage(safePages)}
-        title="Halaman terakhir"
-      >
-        »
+      <button type="button" disabled={safePage >= safePages} className={navBtn} onClick={() => setPage(safePages)} title="Halaman terakhir">
+        <ChevronsRight className={compact ? "h-3 w-3" : "h-3.5 w-3.5"} />
       </button>
     </div>
   );

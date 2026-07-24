@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
-import { Banknote, Eye, Trash2, Undo2, Wallet } from "lucide-react";
+import { Banknote, Eye, Trash2, Undo2, Wallet, Receipt } from "lucide-react";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
@@ -9,7 +9,11 @@ import { formatDateID, formatDateTimeID, formatIDR, formatThousandsIdInput } fro
 import { buildThermalReceiptHtml } from "../utils/receipt";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { TableSkeleton } from "../components/Skeleton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { ActionButton } from "../components/ActionButton";
+import { Badge } from "../components/Badge";
 import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
@@ -24,7 +28,6 @@ function hasOutstandingReceivable(tx) {
 
 function paymentMethodLabel(payment, tx) {
   if (payment?.method !== "hutang") return PAY_LABEL[payment?.method] || payment?.method;
-  // "hutang" di payment transaksi berarti piutang yang dicatat saat transaksi awal.
   return hasOutstandingReceivable(tx) ? "Piutang tercatat" : "Piutang tercatat (sudah lunas)";
 }
 
@@ -103,7 +106,7 @@ export default function TransactionsPage() {
     const t = toast.loading("Menghapus...");
     try {
       await api.delete(`/api/transactions/${deleteDraftId}`);
-      toast.success("Dihapus", { id: t });
+      toast.success("Berhasil dihapus", { id: t });
       setDeleteDraftId(null);
       load();
     } catch {
@@ -123,7 +126,7 @@ export default function TransactionsPage() {
     const t = toast.loading("Menghapus transaksi…");
     try {
       await api.delete(`/api/transactions/${deletePerm.id}`, { skipToast: true });
-      toast.success("Transaksi dihapus", { id: t });
+      toast.success("Transaksi berhasil dihapus", { id: t });
       if (detailId === deletePerm.id) setDetailId(null);
       setDeletePerm(null);
       load();
@@ -153,7 +156,7 @@ export default function TransactionsPage() {
       })
       .catch(() => {
         if (!cancelled) {
-          toast.error("Gagal memuat detail");
+          toast.error("Gagal memuat detail transaksi");
           setDetailId(null);
         }
       })
@@ -213,10 +216,10 @@ export default function TransactionsPage() {
   }
 
   async function doRefund() {
-    const t = toast.loading("Refund...");
+    const t = toast.loading("Proses refund...");
     try {
       await api.post(`/api/transactions/${refundId}/refund`);
-      toast.success("Refund berhasil — stok dikembalikan", { id: t });
+      toast.success("Refund berhasil — stok telah dikembalikan", { id: t });
       setRefundId(null);
       load();
     } catch {
@@ -284,7 +287,7 @@ export default function TransactionsPage() {
         amount: paid,
         cash_account_id: Number(payCashAccountId),
       });
-      toast.success("Pelunasan tercatat", { id: t });
+      toast.success("Pelunasan piutang berhasil dicatat", { id: t });
       const tid = payCtx.txId;
       closePayModal();
       load();
@@ -303,21 +306,18 @@ export default function TransactionsPage() {
 
   return (
     <PageStack>
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Transaksi</h1>
-        <p className="text-sm text-slate-500">
-          Filter dan detail transaksi. Sisa piutang: klik ikon dompet untuk pelunasan (DP / cicilan).
-          {canAdminDeleteTx ? " Admin/owner: hapus permanen untuk transaksi selesai (tanpa sisa piutang) atau yang sudah refund." : ""}
-        </p>
-      </div>
+      <PageHeader
+        title="Riwayat Transaksi"
+        subtitle={`${total} transaksi tercatat · Pencarian invoice, filter tanggal & pelunasan piutang`}
+      />
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
+      <div className="card space-y-4 p-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-12 lg:items-end">
           <div className="sm:col-span-2 lg:col-span-4">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Cari invoice</label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Nomor Invoice</label>
             <input
-              className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950"
-              placeholder="Nomor invoice…"
+              className="input-base mt-1"
+              placeholder="Cari no. invoice..."
               value={q}
               onChange={(e) => {
                 setPage(1);
@@ -326,10 +326,10 @@ export default function TransactionsPage() {
             />
           </div>
           <div className="lg:col-span-2">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Dari tanggal</label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Dari Tanggal</label>
             <input
               type="date"
-              className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1"
               value={from}
               onChange={(e) => {
                 setPage(1);
@@ -338,10 +338,10 @@ export default function TransactionsPage() {
             />
           </div>
           <div className="lg:col-span-2">
-            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Sampai</label>
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Sampai Tanggal</label>
             <input
               type="date"
-              className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1"
               value={to}
               onChange={(e) => {
                 setPage(1);
@@ -349,32 +349,33 @@ export default function TransactionsPage() {
               }}
             />
           </div>
-          <div className="flex items-end gap-2 lg:col-span-2">
-            <button
-              type="button"
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+          <div className="flex items-end lg:col-span-2">
+            <ActionButton
+              variant="secondary"
+              size="md"
+              className="w-full"
               onClick={() => {
                 setFrom("");
                 setTo("");
                 setPage(1);
               }}
             >
-              Reset tanggal
-            </button>
+              Reset Filter
+            </ActionButton>
           </div>
           <div className="sm:col-span-2 lg:col-span-2">
             <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Status</label>
             <select
-              className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1"
               value={statusFilter}
               onChange={(e) => {
                 setPage(1);
                 setStatusFilter(e.target.value);
               }}
             >
-              <option value="">Semua</option>
+              <option value="">Semua Status</option>
               <option value="completed">Selesai</option>
-              <option value="owing">Belum lunas (piutang)</option>
+              <option value="owing">Belum Lunas (Piutang)</option>
               <option value="draft">Draft</option>
               <option value="hold">Hold</option>
               <option value="refunded">Refund</option>
@@ -385,112 +386,80 @@ export default function TransactionsPage() {
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={6} cols={7} />
-          </div>
+          <LoadingSpinner label="Memuat riwayat transaksi..." />
+        ) : list.length === 0 ? (
+          <EmptyState
+            icon={Receipt}
+            title="Tidak Ada Transaksi"
+            message={q || from || to || statusFilter ? "Tidak ada transaksi yang cocok dengan filter." : "Belum ada transaksi Penjualan POS."}
+          />
         ) : (
           <table className={PAGE_TABLE_WIDE}>
-            <thead className="bg-slate-50 dark:bg-slate-800/80">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left">Invoice</th>
-                <th className="px-4 py-3 text-left">Tgl transaksi</th>
-                <th className="px-4 py-3 text-left">Kasir</th>
-                <th className="px-4 py-3 text-left">Pelanggan</th>
-                <th className="px-4 py-3 text-right">Total</th>
-                <th className="px-4 py-3 text-left">Status</th>
-                <th className="px-4 py-3 text-right">Aksi</th>
+                <th className="w-36">Invoice</th>
+                <th>Tanggal</th>
+                <th>Kasir</th>
+                <th>Pelanggan</th>
+                <th className="text-right">Total Transaksi</th>
+                <th>Status</th>
+                <th className="w-32 text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+            <tbody>
               {list.map((x) => (
                 <tr key={x.id}>
-                  <td className="px-4 py-3 font-mono text-xs">{x.invoice_no}</td>
-                  <td className="px-4 py-3">{displayTxDate(x)}</td>
-                  <td className="px-4 py-3">{x.cashier_name || "—"}</td>
-                  <td className="px-4 py-3">{x.customer_name || "—"}</td>
-                  <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
-                  <td className="px-4 py-3">
+                  <td className="font-mono text-xs font-medium text-slate-700 dark:text-slate-300">{x.invoice_no}</td>
+                  <td className="text-xs text-slate-600 dark:text-slate-400">{displayTxDate(x)}</td>
+                  <td className="text-slate-800 dark:text-slate-200">{x.cashier_name || "—"}</td>
+                  <td className="text-slate-800 dark:text-slate-200">{x.customer_name || "—"}</td>
+                  <td className="text-right font-mono text-xs font-semibold text-slate-900 dark:text-white">{formatIDR(x.grand_total)}</td>
+                  <td>
                     {x.status === "completed" && hasOutstandingReceivable(x) ? (
                       <div>
-                        <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-200">
-                          belum lunas
-                        </span>
-                        <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">Sisa piutang {formatIDR(x.receivable_balance)}</p>
+                        <Badge variant="warning">Belum Lunas</Badge>
+                        <p className="mt-0.5 font-mono text-[11px] text-amber-700 dark:text-amber-300">Sisa: {formatIDR(x.receivable_balance)}</p>
                       </div>
+                    ) : x.status === "completed" ? (
+                      <Badge variant="success">Selesai</Badge>
+                    ) : x.status === "refunded" ? (
+                      <Badge variant="danger">Refund</Badge>
                     ) : (
-                      <span className="capitalize">{x.status}</span>
+                      <Badge variant="neutral" className="capitalize">{x.status}</Badge>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex justify-end gap-1">
-                      <button
-                        type="button"
-                        className="rounded-lg p-2 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/30"
-                        title="Detail"
-                        aria-label="Detail transaksi"
-                        onClick={() => setDetailId(x.id)}
-                      >
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <ActionButton variant="ghost-brand" size="icon" onClick={() => setDetailId(x.id)} title="Detail Transaksi">
                         <Eye className="h-4 w-4" />
-                      </button>
+                      </ActionButton>
+
                       {x.status === "completed" && hasOutstandingReceivable(x) && (
-                        <button
-                          type="button"
-                          className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/40"
-                          title="Pelunasan piutang"
-                          aria-label="Bayar sisa piutang"
-                          onClick={() => openPayPiutang(x.id)}
-                        >
+                        <ActionButton variant="ghost" size="icon" className="text-amber-600 hover:bg-amber-50 dark:text-amber-400" onClick={() => openPayPiutang(x.id)} title="Pelunasan Piutang">
                           <Wallet className="h-4 w-4" />
-                        </button>
+                        </ActionButton>
                       )}
+
                       {x.status === "completed" && (
-                        <button
-                          type="button"
-                          className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                          title="Refund"
-                          aria-label="Refund transaksi"
-                          onClick={() => setRefundId(x.id)}
-                        >
+                        <ActionButton variant="ghost-danger" size="icon" onClick={() => setRefundId(x.id)} title="Refund Transaksi">
                           <Undo2 className="h-4 w-4" />
-                        </button>
+                        </ActionButton>
                       )}
+
                       {canPermanentDelete(x) && (
-                        <button
-                          type="button"
-                          className="rounded-lg p-2 text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
-                          title="Hapus permanen (admin)"
-                          aria-label="Hapus transaksi permanen"
-                          onClick={() =>
-                            setDeletePerm({
-                              id: x.id,
-                              invoice_no: x.invoice_no,
-                              status: x.status,
-                            })
-                          }
-                        >
+                        <ActionButton variant="ghost-danger" size="icon" onClick={() => setDeletePerm({ id: x.id, invoice_no: x.invoice_no, status: x.status })} title="Hapus Permanen (Admin)">
                           <Trash2 className="h-4 w-4" />
-                        </button>
+                        </ActionButton>
                       )}
+
                       {(x.status === "draft" || x.status === "hold") && (
                         <>
-                          <button
-                            type="button"
-                            className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30"
-                            title="Lanjut bayar di POS"
-                            aria-label="Buka POS dengan keranjang terisi, siap bayar"
-                            onClick={() => navigate(`/app/pos?resume=${x.id}`)}
-                          >
+                          <ActionButton variant="ghost-brand" size="icon" onClick={() => navigate(`/app/pos?resume=${x.id}`)} title="Lanjut bayar di POS">
                             <Banknote className="h-4 w-4" />
-                          </button>
-                          <button
-                            type="button"
-                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                            title="Hapus draft"
-                            aria-label="Hapus draft atau hold"
-                            onClick={() => setDeleteDraftId(x.id)}
-                          >
+                          </ActionButton>
+                          <ActionButton variant="ghost-danger" size="icon" onClick={() => setDeleteDraftId(x.id)} title="Hapus Draft">
                             <Trash2 className="h-4 w-4" />
-                          </button>
+                          </ActionButton>
                         </>
                       )}
                     </div>
@@ -502,166 +471,150 @@ export default function TransactionsPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-2 text-sm sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-slate-500 dark:text-slate-400">
-          Hal {page} / {pages}
-        </span>
-        <PaginationBar page={page} pages={pages} setPage={setPage} />
-      </div>
+      {!loading && list.length > 0 && (
+        <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Hal {page} dari {pages} ({total} transaksi)
+          </span>
+          <PaginationBar page={page} pages={pages} setPage={setPage} />
+        </div>
+      )}
 
-      <Modal open={!!detailId} title={detail ? `Transaksi ${detail.invoice_no}` : "Detail transaksi"} onClose={() => setDetailId(null)} wide>
-        {detailLoading && <p className="text-sm text-slate-500">Memuat…</p>}
+      <Modal open={!!detailId} title={detail ? `Detail Transaksi — ${detail.invoice_no}` : "Detail Transaksi"} onClose={() => setDetailId(null)} wide>
+        {detailLoading && <LoadingSpinner label="Memuat rincian transaksi..." />}
         {!detailLoading && detail && (
           <div className="space-y-4">
-            <div className="grid gap-2 text-sm md:grid-cols-2">
-              <p>
-                <span className="text-slate-500">Status transaksi</span>
-                <br />
-                <span className="font-medium capitalize">{detail.status}</span>
-              </p>
-              {detail.status === "completed" && (
-                <p>
-                  <span className="text-slate-500">Status pembayaran</span>
-                  <br />
-                  <span className={`font-medium ${hasOutstandingReceivable(detail) ? "text-amber-700 dark:text-amber-300" : "text-emerald-700 dark:text-emerald-300"}`}>
-                    {hasOutstandingReceivable(detail) ? "Belum lunas (ada piutang)" : "Lunas"}
-                  </span>
+            <div className="grid gap-3 rounded-xl border border-slate-200/80 bg-slate-50/70 p-4 text-xs dark:border-slate-800 dark:bg-slate-950 md:grid-cols-3">
+              <div>
+                <span className="text-slate-500">Status Transaksi:</span>
+                <p className="mt-0.5 font-semibold capitalize text-slate-800 dark:text-slate-200">{detail.status}</p>
+              </div>
+              <div>
+                <span className="text-slate-500">Status Pembayaran:</span>
+                <p className="mt-0.5 font-semibold">
+                  {hasOutstandingReceivable(detail) ? (
+                    <span className="text-amber-600 dark:text-amber-400">Belum Lunas (Ada Piutang)</span>
+                  ) : (
+                    <span className="text-emerald-600 dark:text-emerald-400">Lunas</span>
+                  )}
                 </p>
-              )}
-              <p>
-                <span className="text-slate-500">Waktu sistem</span>
-                <br />
-                <span className="font-medium">{formatDateTimeID(detail.created_at)}</span>
-              </p>
-              {detail.sale_date && (
-                <p>
-                  <span className="text-slate-500">Tanggal penjualan</span>
-                  <br />
-                  <span className="font-medium">{formatDateID(detail.sale_date)}</span>
-                </p>
-              )}
-              <p>
-                <span className="text-slate-500">Kasir</span>
-                <br />
-                <span className="font-medium">{detail.cashier_name || "—"}</span>
-              </p>
-              <p>
-                <span className="text-slate-500">Pelanggan</span>
-                <br />
-                <span className="font-medium">{detail.customer_name || "—"}</span>
-              </p>
+              </div>
+              <div>
+                <span className="text-slate-500">Waktu / Tanggal:</span>
+                <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200">{formatDateTimeID(detail.created_at)}</p>
+              </div>
+              <div>
+                <span className="text-slate-500">Kasir:</span>
+                <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200">{detail.cashier_name || "—"}</p>
+              </div>
+              <div>
+                <span className="text-slate-500">Pelanggan:</span>
+                <p className="mt-0.5 font-semibold text-slate-800 dark:text-slate-200">{detail.customer_name || "—"}</p>
+              </div>
             </div>
+
             <div className={PAGE_TABLE_WRAP}>
               <table className={PAGE_TABLE_WIDE}>
-                <thead className="bg-slate-50 dark:bg-slate-800/80">
+                <thead>
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs">Produk</th>
-                    <th className="px-3 py-2 text-right text-xs">Harga</th>
-                    <th className="px-3 py-2 text-right text-xs">Qty</th>
-                    <th className="px-3 py-2 text-right text-xs">Diskon</th>
-                    <th className="px-3 py-2 text-right text-xs">Jumlah</th>
+                    <th>Produk</th>
+                    <th className="text-right">Harga</th>
+                    <th className="text-right">Qty</th>
+                    <th className="text-right">Diskon</th>
+                    <th className="text-right">Total</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
+                <tbody>
                   {(detail.items || []).map((it) => (
                     <tr key={it.id}>
-                      <td className="px-3 py-2 text-sm">{it.product_name}</td>
-                      <td className="px-3 py-2 text-right text-sm">{formatIDR(it.sell_price)}</td>
-                      <td className="px-3 py-2 text-right text-sm">{it.qty}</td>
-                      <td className="px-3 py-2 text-right text-sm">{formatIDR(it.discount_amount)}</td>
-                      <td className="px-3 py-2 text-right text-sm font-medium">{formatIDR(it.line_total)}</td>
+                      <td className="font-medium text-slate-900 dark:text-white">{it.product_name}</td>
+                      <td className="text-right font-mono text-xs">{formatIDR(it.sell_price)}</td>
+                      <td className="text-right font-mono text-xs">{it.qty}</td>
+                      <td className="text-right font-mono text-xs text-rose-600">{formatIDR(it.discount_amount)}</td>
+                      <td className="text-right font-mono text-xs font-semibold">{formatIDR(it.line_total)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-            <div className="flex flex-wrap justify-between gap-2 border-t border-slate-100 pt-3 text-sm dark:border-slate-800">
-              <div className="space-y-1">
-                <div className="flex justify-between gap-8">
+
+            <div className="flex flex-wrap justify-between gap-4 border-t border-slate-100 pt-3 text-xs dark:border-slate-800">
+              <div className="space-y-1.5 min-w-[200px]">
+                <div className="flex justify-between gap-6">
                   <span className="text-slate-500">Subtotal</span>
-                  <span>{formatIDR(detail.subtotal)}</span>
+                  <span className="font-mono">{formatIDR(detail.subtotal)}</span>
                 </div>
                 {Number(detail.discount_total) > 0 && (
-                  <div className="flex justify-between gap-8">
-                    <span className="text-slate-500">Diskon</span>
-                    <span>-{formatIDR(detail.discount_total)}</span>
+                  <div className="flex justify-between gap-6 text-rose-600">
+                    <span>Total Diskon</span>
+                    <span className="font-mono">-{formatIDR(detail.discount_total)}</span>
                   </div>
                 )}
                 {Number(detail.tax_percent) > 0 && (
-                  <div className="flex justify-between gap-8">
-                    <span className="text-slate-500">Pajak {detail.tax_percent}%</span>
-                    <span>{formatIDR(detail.tax_amount)}</span>
+                  <div className="flex justify-between gap-6">
+                    <span className="text-slate-500">Pajak ({detail.tax_percent}%)</span>
+                    <span className="font-mono">{formatIDR(detail.tax_amount)}</span>
                   </div>
                 )}
-                <div className="flex justify-between gap-8 text-base font-bold">
-                  <span>Total</span>
-                  <span>{formatIDR(detail.grand_total)}</span>
+                <div className="flex justify-between gap-6 pt-1 text-sm font-bold border-t border-slate-200 dark:border-slate-800">
+                  <span>Grand Total</span>
+                  <span className="font-mono text-brand-600 dark:text-brand-400">{formatIDR(detail.grand_total)}</span>
                 </div>
               </div>
-              <div className="space-y-1 text-right">
-                <p className="text-xs font-semibold uppercase text-slate-500">Pembayaran</p>
+
+              <div className="space-y-1.5 min-w-[220px] text-right">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">Pembayaran</p>
                 {(detail.payments || []).map((p) => (
-                  <div key={p.id} className="flex justify-end gap-4">
-                    <span>{paymentMethodLabel(p, detail)}</span>
+                  <div key={p.id} className="flex justify-end gap-4 font-mono">
+                    <span className="text-slate-500">{paymentMethodLabel(p, detail)}</span>
                     <span>{formatIDR(p.amount)}</span>
                   </div>
                 ))}
                 {Number(detail.receivable_paid_amount) > RECEIVABLE_EPSILON && (
-                  <div className="flex justify-end gap-4 text-emerald-700 dark:text-emerald-300">
-                    <span>Pelunasan piutang</span>
+                  <div className="flex justify-end gap-4 font-mono text-emerald-600 dark:text-emerald-400">
+                    <span>Pelunasan Piutang</span>
                     <span>{formatIDR(detail.receivable_paid_amount)}</span>
                   </div>
                 )}
-                <div className="flex justify-end gap-4 pt-1 font-medium">
-                  <span>Dibayar</span>
-                  <span>{formatIDR(detail.paid_amount)}</span>
+                <div className="flex justify-end gap-4 pt-1 font-semibold border-t border-slate-100 dark:border-slate-800">
+                  <span>Total Dibayar</span>
+                  <span className="font-mono">{formatIDR(detail.paid_amount)}</span>
                 </div>
                 {hasOutstandingReceivable(detail) && (
-                  <div className="flex justify-end gap-4 text-amber-700 dark:text-amber-300">
-                    <span>Sisa piutang</span>
+                  <div className="flex justify-end gap-4 font-mono font-semibold text-amber-600 dark:text-amber-400">
+                    <span>Sisa Piutang</span>
                     <span>{formatIDR(detail.receivable_balance)}</span>
                   </div>
                 )}
                 {Number(detail.change_amount) > 0 && (
-                  <div className="flex justify-end gap-4 text-emerald-600">
+                  <div className="flex justify-end gap-4 font-mono text-emerald-600">
                     <span>Kembalian</span>
                     <span>{formatIDR(detail.change_amount)}</span>
                   </div>
                 )}
               </div>
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+
+            <div className="flex flex-wrap justify-end gap-2 pt-2">
               {canPermanentDelete(detail) && (
-                <button
-                  type="button"
-                  className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950/30"
-                  onClick={() =>
-                    setDeletePerm({
-                      id: detail.id,
-                      invoice_no: detail.invoice_no,
-                      status: detail.status,
-                    })
-                  }
+                <ActionButton
+                  variant="ghost-danger"
+                  onClick={() => setDeletePerm({ id: detail.id, invoice_no: detail.invoice_no, status: detail.status })}
                 >
-                  Hapus permanen
-                </button>
+                  Hapus Permanen
+                </ActionButton>
               )}
-              <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setDetailId(null)}>
+              <ActionButton variant="secondary" onClick={() => setDetailId(null)}>
                 Tutup
-              </button>
+              </ActionButton>
               {detail.status === "completed" && hasOutstandingReceivable(detail) && (
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-100"
-                  onClick={() => openPayPiutang(detail.id)}
-                >
-                  <Wallet className="h-4 w-4" />
-                  Pelunasan piutang
-                </button>
+                <ActionButton variant="secondary" onClick={() => openPayPiutang(detail.id)}>
+                  <Wallet className="h-4 w-4" /> Pelunasan Piutang
+                </ActionButton>
               )}
-              <button type="button" className="rounded-xl bg-brand-600 px-4 py-2 font-semibold text-white" onClick={printReceipt}>
-                Cetak struk
-              </button>
+              <ActionButton variant="primary" onClick={printReceipt}>
+                Cetak Struk
+              </ActionButton>
             </div>
           </div>
         )}
@@ -669,18 +622,18 @@ export default function TransactionsPage() {
 
       <ConfirmDialog
         open={!!refundId}
-        title="Refund transaksi?"
-        message="Stok produk akan dikembalikan. Yakin?"
+        title="Refund Transaksi?"
+        message="Stok produk akan otomatis dikembalikan ke inventaris. Yakin ingin refund?"
         danger
-        confirmText="Refund"
+        confirmText="Proses Refund"
         onConfirm={doRefund}
         onClose={() => setRefundId(null)}
       />
 
       <ConfirmDialog
         open={!!deleteDraftId}
-        title="Hapus draft / hold?"
-        message="Keranjang tersimpan di server akan dihapus permanen."
+        title="Hapus Draft / Hold?"
+        message="Keranjang tersimpan akan dihapus secara permanen."
         danger
         confirmText="Hapus"
         onConfirm={deleteDraftHold}
@@ -689,33 +642,33 @@ export default function TransactionsPage() {
 
       <ConfirmDialog
         open={!!deletePerm}
-        title="Hapus transaksi permanen?"
+        title="Hapus Transaksi Permanen?"
         message={
           deletePerm
-            ? `Invoice ${deletePerm.invoice_no} (${deletePerm.status}) akan dihapus dari database. Stok dan kas akan disesuaikan (bila ada). Tindakan ini tidak bisa dibatalkan.`
+            ? `Invoice ${deletePerm.invoice_no} (${deletePerm.status}) akan dihapus dari database. Stok dan saldo kas akan disesuaikan. Tindakan ini tidak bisa dibatalkan.`
             : ""
         }
         danger
-        confirmText="Hapus permanen"
+        confirmText="Hapus Permanen"
         onConfirm={deletePermanent}
         onClose={() => setDeletePerm(null)}
       />
 
       <Modal
         open={payOpen}
-        title={payCtx ? `Pelunasan — ${payCtx.invoiceNo}` : "Pelunasan piutang"}
+        title={payCtx ? `Pelunasan Piutang — ${payCtx.invoiceNo}` : "Pelunasan Piutang"}
         onClose={() => {
           if (!payLoading && !paySubmitting) closePayModal();
         }}
       >
-        {payLoading && !payCtx && <p className="text-sm text-slate-500">Memuat data piutang…</p>}
+        {payLoading && !payCtx && <LoadingSpinner label="Memuat data piutang…" />}
         {payCtx && (
           <div className="space-y-4">
             {payCtx.lines.length > 1 && (
               <div>
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Baris piutang</label>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Baris Piutang</label>
                 <select
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                  className="input-base mt-1.5"
                   value={payReceivableId}
                   onChange={(e) => {
                     const id = e.target.value;
@@ -726,30 +679,30 @@ export default function TransactionsPage() {
                 >
                   {payCtx.lines.map((r) => (
                     <option key={r.id} value={r.id}>
-                      #{r.id} — sisa {formatIDR(r.balance)} ({r.status})
+                      #{r.id} — Sisa {formatIDR(r.balance)} ({r.status})
                     </option>
                   ))}
                 </select>
               </div>
             )}
             <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Jumlah dibayar</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Jumlah Dibayar (Rp)</label>
               <input
                 type="text"
                 inputMode="numeric"
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm tabular-nums dark:border-slate-700 dark:bg-slate-950"
+                className="input-base mt-1.5 font-mono"
                 placeholder="0"
                 value={formatThousandsIdInput(payAmountStr)}
                 onChange={(e) => setPayAmountStr(e.target.value.replace(/\D/g, "").slice(0, 14))}
               />
               {payCtx.lines.length === 1 && (
-                <p className="mt-1 text-xs text-slate-500">Maksimal {formatIDR(payCtx.lines[0].balance)}</p>
+                <p className="mt-1 text-xs text-slate-500">Maksimal pelunasan: {formatIDR(payCtx.lines[0].balance)}</p>
               )}
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Masuk ke rekening kas</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Masuk ke Rekening Kas</label>
               <select
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm dark:border-slate-700 dark:bg-slate-950"
+                className="input-base mt-1.5"
                 value={payCashAccountId}
                 onChange={(e) => setPayCashAccountId(e.target.value)}
               >
@@ -762,22 +715,20 @@ export default function TransactionsPage() {
               </select>
             </div>
             <div className="flex justify-end gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
-              <button
-                type="button"
-                className="rounded-xl border px-4 py-2 text-sm"
+              <ActionButton
+                variant="secondary"
                 onClick={closePayModal}
                 disabled={payLoading || paySubmitting}
               >
                 Batal
-              </button>
-              <button
-                type="button"
-                className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              </ActionButton>
+              <ActionButton
+                variant="primary"
                 onClick={submitPayPiutang}
                 disabled={payLoading || paySubmitting || !cashAccounts.length}
               >
-                Simpan pelunasan
-              </button>
+                Simpan Pelunasan
+              </ActionButton>
             </div>
           </div>
         )}

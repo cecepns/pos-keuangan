@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { Plus } from "lucide-react";
+import { Plus, Edit2, Trash2 } from "lucide-react";
 import api from "../api/client";
 import { PAGE_SIZE } from "../constants/pagination";
 import { useDebouncedValue } from "../hooks/useDebouncedValue";
 import { Modal } from "../components/Modal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { TableSkeleton } from "../components/Skeleton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
+import { EmptyState } from "../components/EmptyState";
+import { PageHeader } from "../components/PageHeader";
+import { SearchInput } from "../components/SearchInput";
+import { ActionButton } from "../components/ActionButton";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { useAuthStore } from "../store/authStore";
@@ -56,13 +60,13 @@ export default function CategoriesPage() {
 
   async function save() {
     const name = draft.name.trim();
-    if (!name) return toast.error("Nama wajib");
+    if (!name) return toast.error("Nama wajib diisi");
     const code = draft.code.trim() || null;
     const t = toast.loading("Menyimpan...");
     try {
       if (draft.id) await api.put(`/api/categories/${draft.id}`, { name, code });
       else await api.post("/api/categories", { name, code });
-      toast.success("Disimpan", { id: t });
+      toast.success("Kategori berhasil disimpan", { id: t });
       setOpen(false);
       load();
     } catch {
@@ -74,70 +78,65 @@ export default function CategoriesPage() {
 
   return (
     <PageStack>
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Data kategori</h1>
-          <p className="text-sm text-slate-500">
-            {total} kategori · kode bisa diisi manual atau otomatis dari ID
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-2xl bg-brand-600 px-5 py-2.5 font-semibold text-white"
-        >
-          <Plus className="h-5 w-5" /> Tambah
-        </button>
-      </div>
+      <PageHeader
+        title="Data Kategori"
+        subtitle={`${total} kategori terdaftar · kode bisa diisi manual atau otomatis`}
+      >
+        <ActionButton onClick={openCreate} variant="primary">
+          <Plus className="h-4 w-4" /> Tambah Kategori
+        </ActionButton>
+      </PageHeader>
 
-      <input
-        className="max-w-md rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-700 dark:bg-slate-900"
+      <SearchInput
         placeholder="Cari kategori..."
         value={q}
-        onChange={(e) => {
+        onChange={(val) => {
           setPage(1);
-          setQ(e.target.value);
+          setQ(val);
         }}
       />
 
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
-          <div className="p-4">
-            <TableSkeleton rows={6} cols={4} />
-          </div>
+          <LoadingSpinner label="Memuat kategori..." />
+        ) : list.length === 0 ? (
+          <EmptyState
+            title="Tidak ada kategori"
+            message={q ? "Tidak ada kategori yang cocok dengan pencarian." : "Belum ada kategori yang ditambahkan."}
+          >
+            {!q && (
+              <ActionButton onClick={openCreate} variant="secondary" size="sm" className="mt-2">
+                <Plus className="h-4 w-4" /> Tambah Sekarang
+              </ActionButton>
+            )}
+          </EmptyState>
         ) : (
           <table className={PAGE_TABLE}>
-            <thead className="bg-slate-50 dark:bg-slate-800/80">
+            <thead>
               <tr>
-                <th className="px-4 py-3 text-left text-sm font-semibold">No</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Kode</th>
-                <th className="px-4 py-3 text-left text-sm font-semibold">Nama</th>
-                <th className="px-4 py-3 text-right text-sm font-semibold">Opsi</th>
+                <th className="w-16 text-center">No</th>
+                <th className="w-32">Kode</th>
+                <th>Nama Kategori</th>
+                <th className="w-32 text-right">Aksi</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            <tbody>
               {list.map((c, i) => (
                 <tr key={c.id}>
-                  <td className="px-4 py-3 text-slate-500">{(page - 1) * PAGE_SIZE + i + 1}</td>
-                  <td className="px-4 py-3 font-mono text-sm">{displayCode(c)}</td>
-                  <td className="px-4 py-3 font-medium text-slate-900 dark:text-white">{c.name}</td>
-                  <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      className="mr-2 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white"
-                      onClick={() => openEdit(c)}
-                    >
-                      Edit
-                    </button>
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white"
-                        onClick={() => setDelId(c.id)}
-                      >
-                        Hapus
-                      </button>
-                    )}
+                  <td className="text-center font-mono text-xs text-slate-400">{(page - 1) * PAGE_SIZE + i + 1}</td>
+                  <td className="font-mono text-xs font-medium text-slate-600 dark:text-slate-400">{displayCode(c)}</td>
+                  <td className="font-medium text-slate-900 dark:text-white">{c.name}</td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <ActionButton variant="ghost-brand" size="icon" onClick={() => openEdit(c)} title="Edit">
+                        <Edit2 className="h-4 w-4" />
+                      </ActionButton>
+                      {isAdmin && (
+                        <ActionButton variant="ghost-danger" size="icon" onClick={() => setDelId(c.id)} title="Hapus">
+                          <Trash2 className="h-4 w-4" />
+                        </ActionButton>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -146,56 +145,58 @@ export default function CategoriesPage() {
         )}
       </div>
 
-      <div className="flex flex-col gap-2 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
-        <span>
-          Hal {page} / {pages}
-        </span>
-        <PaginationBar page={page} pages={pages} setPage={setPage} />
-      </div>
+      {!loading && list.length > 0 && (
+        <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+          <span>
+            Menampilkan {list.length} dari {total} kategori (Hal {page} dari {pages})
+          </span>
+          <PaginationBar page={page} pages={pages} setPage={setPage} />
+        </div>
+      )}
 
-      <Modal open={open} title={draft.id ? "Edit kategori" : "Kategori baru"} onClose={() => setOpen(false)}>
-        <div className="space-y-3">
+      <Modal open={open} title={draft.id ? "Edit Kategori" : "Tambah Kategori Baru"} onClose={() => setOpen(false)}>
+        <div className="space-y-4">
           <div>
-            <label className="text-xs text-slate-500">Kode (opsional)</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Kode Kategori (Opsional)</label>
             <input
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={draft.code}
               onChange={(e) => setDraft((d) => ({ ...d, code: e.target.value }))}
-              placeholder="Mis. 0001"
+              placeholder="Misal: KAT-001"
             />
           </div>
           <div>
-            <label className="text-xs text-slate-500">Nama</label>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Nama Kategori</label>
             <input
-              className="mt-1 w-full rounded-xl border px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
+              className="input-base mt-1.5"
               value={draft.name}
               onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
-              placeholder="Nama kategori"
+              placeholder="Nama kategori barang..."
             />
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setOpen(false)}>
+            <ActionButton variant="secondary" onClick={() => setOpen(false)}>
               Batal
-            </button>
-            <button type="button" className="rounded-xl bg-brand-600 px-5 py-2 font-semibold text-white" onClick={save}>
+            </ActionButton>
+            <ActionButton variant="primary" onClick={save}>
               Simpan
-            </button>
+            </ActionButton>
           </div>
         </div>
       </Modal>
 
       <ConfirmDialog
         open={!!delId}
-        title="Hapus kategori?"
-        message="Pastikan tidak digunakan untuk mapping penting."
+        title="Hapus Kategori?"
+        message="Pastikan kategori ini tidak sedang digunakan oleh barang lain."
         danger
         onConfirm={async () => {
           try {
             await api.delete(`/api/categories/${delId}`);
-            toast.success("Dihapus");
+            toast.success("Kategori berhasil dihapus");
             load();
           } catch {
-            toast.error("Gagal menghapus");
+            toast.error("Gagal menghapus kategori");
           }
           setDelId(null);
         }}

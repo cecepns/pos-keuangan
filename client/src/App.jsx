@@ -6,7 +6,7 @@ import { useThemeStore } from "./store/themeStore";
 import { ProtectedRoute } from "./components/ProtectedRoute";
 import { PermGate } from "./components/PermGate";
 import { AppShell } from "./components/AppShell";
-import { Skeleton } from "./components/Skeleton";
+import { LoadingSpinner } from "./components/LoadingSpinner";
 
 const Login = lazy(() => import("./pages/Login.jsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.jsx"));
@@ -30,12 +30,7 @@ const UsersPage = lazy(() => import("./pages/UsersPage.jsx"));
 const NotFound = lazy(() => import("./pages/NotFound.jsx"));
 
 function PageLoader() {
-  return (
-    <div className="space-y-3 p-4">
-      <Skeleton className="h-10 w-48" />
-      <Skeleton className="h-64 w-full" />
-    </div>
-  );
+  return <LoadingSpinner label="Memuat halaman…" />;
 }
 
 export default function App() {

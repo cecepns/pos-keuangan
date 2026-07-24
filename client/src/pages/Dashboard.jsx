@@ -20,8 +20,10 @@ import { TrendingUp, Wallet, ShoppingBag, AlertTriangle, ArrowUpRight, ArrowDown
 import toast from "react-hot-toast";
 import api from "../api/client";
 import { formatDateID, formatIDR } from "../utils/format";
-import { Skeleton } from "../components/Skeleton";
+import { LoadingSpinner } from "../components/LoadingSpinner";
 import { useAuthStore } from "../store/authStore";
+import { PageHeader } from "../components/PageHeader";
+import { ActionButton } from "../components/ActionButton";
 import moment from "moment";
 import "moment/locale/id";
 
@@ -35,17 +37,33 @@ function formatDashboardChartDate(value) {
 
 function StatCard({ title, value, icon: Icon, accent }) {
   return (
-    <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+    <div className="card p-5">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-sm font-medium text-slate-500">{title}</p>
-          <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{value}</p>
+          <p className="text-xs font-medium uppercase tracking-wider text-slate-500">{title}</p>
+          <p className="mt-2 text-xl font-semibold tracking-tight text-slate-900 dark:text-white">{value}</p>
         </div>
-        <div className={`rounded-xl p-3 ${accent}`}>
-          <Icon className="h-6 w-6 text-white" />
+        <div className={`rounded-xl p-2.5 ${accent}`}>
+          <Icon className="h-5 w-5 text-white" />
         </div>
       </div>
     </div>
+  );
+}
+
+function DeltaBadge({ delta }) {
+  const positive = delta >= 0;
+  return (
+    <span
+      className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-xs font-semibold ${
+        positive
+          ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+          : "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+      }`}
+    >
+      {positive ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+      {Math.abs(delta).toFixed(1)}%
+    </span>
   );
 }
 
@@ -134,17 +152,7 @@ export default function Dashboard() {
   }
 
   if (loading || !data) {
-    return (
-      <div className="space-y-4">
-        <Skeleton className="h-10 w-64" />
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-28" />
-          ))}
-        </div>
-        <Skeleton className="h-80" />
-      </div>
-    );
+    return <LoadingSpinner label="Memuat dashboard…" />;
   }
 
   const filtered = !!(data.filter?.from && data.filter?.to);
@@ -175,73 +183,51 @@ export default function Dashboard() {
   const showFinance = role !== "kasir";
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-5">
       {refreshing ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-start justify-end p-2">
-          <span className="rounded-full bg-slate-900/80 px-3 py-1 text-xs font-medium text-white">Memuat…</span>
+          <span className="rounded-full bg-slate-900/80 px-3 py-1 text-xs font-medium text-white animate-fade-in">Memuat…</span>
         </div>
       ) : null}
 
-      <div className="space-y-3">
+      <PageHeader
+        title="Dashboard"
+        subtitle={
+          filtered
+            ? `Ringkasan operasional · Filter: ${formatDateID(data.filter.from)} — ${formatDateID(data.filter.to)}`
+            : "Ringkasan operasional & performa penjualan"
+        }
+      />
+
+      {/* Filter */}
+      <div className="card flex flex-col gap-3 p-4 sm:flex-row sm:flex-wrap sm:items-end">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Dashboard</h1>
-          <p className="text-sm text-slate-500">
-            Ringkasan operasional & performa penjualan
-            {filtered ? (
-              <>
-                {" "}
-                · Filter:{" "}
-                <span className="font-medium text-slate-700 dark:text-slate-300">
-                  {formatDateID(data.filter.from)} — {formatDateID(data.filter.to)}
-                </span>
-              </>
-            ) : null}
-          </p>
+          <label className="text-xs font-medium text-slate-500">Dari</label>
+          <input
+            type="date"
+            className="input-base mt-1"
+            value={draftFrom}
+            onChange={(e) => setDraftFrom(e.target.value)}
+          />
         </div>
-        <div className="flex flex-col gap-2 rounded-2xl border border-slate-100 bg-white p-4 shadow-soft dark:border-slate-800 dark:bg-slate-900 sm:flex-row sm:flex-wrap sm:items-end">
-          <div>
-            <label className="text-xs font-medium text-slate-500">Dari</label>
-            <input
-              type="date"
-              className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-              value={draftFrom}
-              onChange={(e) => setDraftFrom(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-slate-500">Sampai</label>
-            <input
-              type="date"
-              className="mt-1 block w-full rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
-              value={draftTo}
-              onChange={(e) => setDraftTo(e.target.value)}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={applyFilter}
-            className="rounded-xl bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm"
-          >
-            Terapkan
-          </button>
-          <button
-            type="button"
-            onClick={resetFilter}
-            className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 dark:border-slate-600 dark:text-slate-200"
-          >
-            Reset
-          </button>
-          <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-2 sm:border-0 sm:pt-0 dark:border-slate-800">
-            <button type="button" onClick={presetThisMonth} className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              Bulan ini
-            </button>
-            <button type="button" onClick={presetLast7Days} className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-200">
-              7 hari terakhir
-            </button>
-          </div>
+        <div>
+          <label className="text-xs font-medium text-slate-500">Sampai</label>
+          <input
+            type="date"
+            className="input-base mt-1"
+            value={draftTo}
+            onChange={(e) => setDraftTo(e.target.value)}
+          />
+        </div>
+        <ActionButton variant="primary" size="sm" onClick={applyFilter}>Terapkan</ActionButton>
+        <ActionButton variant="secondary" size="sm" onClick={resetFilter}>Reset</ActionButton>
+        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-2 sm:border-0 sm:pt-0 dark:border-slate-800">
+          <ActionButton variant="ghost" size="xs" onClick={presetThisMonth}>Bulan ini</ActionButton>
+          <ActionButton variant="ghost" size="xs" onClick={presetLast7Days}>7 hari terakhir</ActionButton>
         </div>
       </div>
 
+      {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           title={filtered ? "Omzet (periode)" : "Omzet hari ini"}
@@ -269,35 +255,26 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Comparison */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+        <div className="card p-5">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900 dark:text-white">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
               {filtered ? "Omzet vs periode sebelumnya" : "Omzet vs bulan lalu"}
             </h3>
-            <span
-              className={`flex items-center gap-1 text-sm font-medium ${omzetDelta >= 0 ? "text-emerald-600" : "text-red-500"}`}
-            >
-              {omzetDelta >= 0 ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-              {omzetDelta.toFixed(1)}%
-            </span>
+            <DeltaBadge delta={omzetDelta} />
           </div>
           <p className="text-xs text-slate-500">
             {filtered ? "Periode dipilih" : "Bulan ini"} {formatIDR(data.compareMonth.omzetNow)} ·{" "}
             {filtered ? "Sebelumnya" : "Bulan lalu"} {formatIDR(data.compareMonth.omzetPrev)}
           </p>
         </div>
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
+        <div className="card p-5">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-semibold text-slate-900 dark:text-white">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
               {filtered ? "Margin vs periode sebelumnya" : "Margin vs bulan lalu"}
             </h3>
-            <span
-              className={`flex items-center gap-1 text-sm font-medium ${marginDelta >= 0 ? "text-emerald-600" : "text-red-500"}`}
-            >
-              {marginDelta >= 0 ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-              {marginDelta.toFixed(1)}%
-            </span>
+            <DeltaBadge delta={marginDelta} />
           </div>
           <p className="text-xs text-slate-500">
             {filtered ? "Margin periode ini" : "Margin bulan ini"} {formatIDR(data.compareMonth.marginNow)} ·{" "}
@@ -306,22 +283,24 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Cash flow summary */}
       {showFinance && data.cashFlow && (
         <div className="grid gap-4 md:grid-cols-2">
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-sm text-slate-500">{filtered ? "Kas masuk (periode)" : "Kas masuk (hari ini)"}</p>
-            <p className="mt-1 text-xl font-bold text-emerald-600">{formatIDR(data.cashFlow.in)}</p>
+          <div className="card p-5">
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">{filtered ? "Kas masuk (periode)" : "Kas masuk (hari ini)"}</p>
+            <p className="mt-1.5 text-lg font-semibold text-emerald-600">{formatIDR(data.cashFlow.in)}</p>
           </div>
-          <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-            <p className="text-sm text-slate-500">{filtered ? "Kas keluar (periode)" : "Kas keluar (hari ini)"}</p>
-            <p className="mt-1 text-xl font-bold text-red-500">{formatIDR(data.cashFlow.out)}</p>
+          <div className="card p-5">
+            <p className="text-xs font-medium uppercase tracking-wider text-slate-500">{filtered ? "Kas keluar (periode)" : "Kas keluar (hari ini)"}</p>
+            <p className="mt-1.5 text-lg font-semibold text-red-500">{formatIDR(data.cashFlow.out)}</p>
           </div>
         </div>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-3">
-        <div className="xl:col-span-2 rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">
+      {/* Charts */}
+      <div className="grid gap-5 xl:grid-cols-3">
+        <div className="xl:col-span-2 card p-5">
+          <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">
             {filtered ? "Tren penjualan (per tanggal dalam rentang)" : "Tren penjualan (14 hari)"}
           </h3>
           <div className="h-72">
@@ -343,8 +322,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">
+        <div className="card p-5">
+          <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">
             {filtered ? "Best seller — periode (qty)" : "Best seller — bulan ini (qty)"}
           </h3>
           <div className="h-72">
@@ -363,9 +342,9 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">
+      <div className="grid gap-5 lg:grid-cols-2">
+        <div className="card p-5">
+          <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">
             {filtered ? "Profit per hari (dalam rentang)" : "Profit harian"}
           </h3>
           <div className="h-64">
@@ -382,17 +361,17 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 flex items-center gap-2 font-semibold text-slate-900 dark:text-white">
-            <AlertTriangle className="h-5 w-5 text-amber-500" />
+        <div className="card p-5">
+          <h3 className="mb-4 flex items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
+            <AlertTriangle className="h-4 w-4 text-amber-500" />
             Stok menipis
           </h3>
-          <div className="max-h-64 space-y-2 overflow-auto">
+          <div className="max-h-64 space-y-1.5 overflow-auto">
             {(data.lowStock || []).length === 0 ? (
               <p className="text-sm text-slate-500">Semua stok aman</p>
             ) : (
               (data.lowStock || []).map((p) => (
-                <div key={p.id} className="flex justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
+                <div key={p.id} className="flex justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800">
                   <span className="font-medium">{p.name}</span>
                   <span className="text-amber-600">
                     {p.stock} / min {p.min_stock}
@@ -405,8 +384,8 @@ export default function Dashboard() {
       </div>
 
       {showFinance && (
-        <div className="rounded-2xl border border-slate-100 bg-white p-5 shadow-soft dark:border-slate-800 dark:bg-slate-900">
-          <h3 className="mb-4 font-semibold text-slate-900 dark:text-white">Volume penjualan (batang)</h3>
+        <div className="card p-5">
+          <h3 className="mb-4 text-sm font-semibold text-slate-900 dark:text-white">Volume penjualan (batang)</h3>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={(data.bestSeller || []).slice(0, 8)}>
