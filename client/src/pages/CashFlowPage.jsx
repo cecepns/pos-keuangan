@@ -15,7 +15,7 @@ import { PageHeader } from "../components/PageHeader";
 import { SearchInput } from "../components/SearchInput";
 import { ActionButton } from "../components/ActionButton";
 import { Badge } from "../components/Badge";
-import { PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
+import { PAGE_TABLE, PAGE_TABLE_WIDE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 
 const TYPE_LABEL = { kas: "Kas", bank: "Bank", ewallet: "E-Wallet" };
