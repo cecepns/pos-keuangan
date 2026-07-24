@@ -98,6 +98,7 @@ export default function ProductsPage() {
       brand: "",
       supplier_id: "",
       category_ids: [],
+      reward_points: 0,
       is_active: true,
       image_path: "",
     },
@@ -201,6 +202,7 @@ export default function ProductsPage() {
       brand: "",
       supplier_id: "",
       category_ids: [],
+      reward_points: 0,
       is_active: true,
       image_path: "",
       units: [],
@@ -233,6 +235,7 @@ export default function ProductsPage() {
         brand: data.brand || "",
         supplier_id: data.supplier_id || "",
         category_ids: data.category_ids || [],
+        reward_points: data.reward_points || 0,
         units: fetchedUnits,
         prices: fetchedPrices,
       });
@@ -252,6 +255,7 @@ export default function ProductsPage() {
       unit: values.unit || "PCS",
       location: values.location || null,
       brand: values.brand || null,
+      reward_points: Number(values.reward_points || 0),
       units: values.units || [],
       prices: values.prices || [],
     };
@@ -545,6 +549,10 @@ export default function ProductsPage() {
           <div>
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Merek / Tipe</label>
             <input className="input-base mt-1.5" {...form.register("brand")} placeholder="Merk..." />
+          </div>
+          <div>
+            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Poin Hadiah (Per Item)</label>
+            <input type="number" min="0" className="input-base mt-1.5" {...form.register("reward_points")} placeholder="0" />
           </div>
           <div>
             <label className="text-sm font-medium text-slate-700 dark:text-slate-300">Supplier</label>

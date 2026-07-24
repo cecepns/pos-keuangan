@@ -13,6 +13,7 @@ import {
   Minus,
   Tags,
   Info,
+  Award,
 } from "lucide-react";
 import Select from "react-select";
 import JsBarcode from "jsbarcode";
@@ -48,6 +49,13 @@ export default function PosPage() {
   const [taxPercent, setTaxPercent] = useState(0);
   const [notes, setNotes] = useState("");
   const [saleDate, setSaleDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [pointsRedeemed, setPointsRedeemed] = useState(0);
+  const [pointsRedeemedDraft, setPointsRedeemedDraft] = useState(null);
+  const [loyaltyCfg, setLoyaltyCfg] = useState({
+    enabled: true,
+    point_redeem_value: 100,
+    default_product_points: 0,
+  });
   const [receiptCfg, setReceiptCfg] = useState({
     store_name: "",
     store_address: "",
@@ -141,6 +149,11 @@ export default function PosPage() {
         const tx = Number(data.tax_default || 0);
         if (!Number.isNaN(tx)) setTaxPercent(tx);
         setAllowNegativeStock(data.allow_negative_stock === "1" || data.allow_negative_stock === "true");
+        setLoyaltyCfg({
+          enabled: data.loyalty_enabled !== "0",
+          point_redeem_value: Number(data.point_redeem_value || 100),
+          default_product_points: Number(data.default_product_points || 0),
+        });
       })
       .catch(() => {});
   }, []);
@@ -365,12 +378,34 @@ export default function PosPage() {
     return Math.max(0, Math.floor(availableBaseUnits / conv));
   }
 
+  useEffect(() => {
+    setPointsRedeemed(0);
+    setPointsRedeemedDraft(null);
+  }, [customerId]);
+
+  const customerPoints = Number(selectedCustomerObj?.points || 0);
+
+  const expectedPointsEarned = useMemo(() => {
+    if (!loyaltyCfg.enabled) return 0;
+    return cart.reduce((sum, item) => {
+      const prod = products.find((p) => p.id === item.product_id);
+      const pts = Number(prod?.reward_points > 0 ? prod.reward_points : loyaltyCfg.default_product_points || 0);
+      return sum + pts * item.qty;
+    }, 0);
+  }, [cart, products, loyaltyCfg]);
+
+  const pointDiscountAmount = useMemo(() => {
+    if (!loyaltyCfg.enabled || !pointsRedeemed) return 0;
+    return pointsRedeemed * loyaltyCfg.point_redeem_value;
+  }, [pointsRedeemed, loyaltyCfg]);
+
   const subtotal = useMemo(
     () => cart.reduce((s, c) => s + c.sell_price * c.qty - (c.discount_amount || 0), 0),
     [cart]
   );
-  const taxAmount = useMemo(() => (subtotal - discountTotal) * (taxPercent / 100), [subtotal, discountTotal, taxPercent]);
-  const grandTotal = useMemo(() => subtotal - discountTotal + taxAmount, [subtotal, discountTotal, taxAmount]);
+  const subtotalAfterDisc = useMemo(() => Math.max(0, subtotal - discountTotal - pointDiscountAmount), [subtotal, discountTotal, pointDiscountAmount]);
+  const taxAmount = useMemo(() => subtotalAfterDisc * (taxPercent / 100), [subtotalAfterDisc, taxPercent]);
+  const grandTotal = useMemo(() => subtotalAfterDisc + taxAmount, [subtotalAfterDisc, taxAmount]);
 
   useEffect(() => {
     if (payOpen && !payModalOpenedRef.current) {
@@ -567,6 +602,7 @@ export default function PosPage() {
       notes,
       sale_date: saleDate,
       status,
+      points_redeemed: pointsRedeemed,
       items: cart.map((c) => ({
         product_id: c.product_id,
         qty: c.qty,
@@ -596,6 +632,8 @@ export default function PosPage() {
       setCart([]);
       setLineDraft({});
       setDiscountTotal(0);
+      setPointsRedeemed(0);
+      setPointsRedeemedDraft(null);
       setNotes("");
       setPayOpen(false);
       setTransferAmtStr("");
@@ -1109,6 +1147,62 @@ export default function PosPage() {
               }}
             />
           </div>
+
+          {selectedCustomerObj && loyaltyCfg.enabled && (
+            <div className="mb-3 p-3 rounded-2xl bg-emerald-50/80 border border-emerald-200/80 dark:bg-emerald-950/30 dark:border-emerald-900/50">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5">
+                  <Award className="h-4 w-4 text-emerald-600" />
+                  Saldo Poin: {customerPoints} Pts
+                </span>
+                {expectedPointsEarned > 0 && (
+                  <span className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                    +{expectedPointsEarned} Pts Hadiah
+                  </span>
+                )}
+              </div>
+
+              {customerPoints > 0 && (
+                <div className="mt-2.5 pt-2 border-t border-emerald-200/60 dark:border-emerald-900/40">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-medium text-emerald-900 dark:text-emerald-200">
+                      Tukarkan Poin (Diskon):
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        className="w-24 rounded-lg border border-emerald-300 bg-white px-2 py-1 text-right text-xs font-semibold text-emerald-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-100"
+                        placeholder="0 Pts"
+                        value={pointsRedeemedDraft !== null ? pointsRedeemedDraft : pointsRedeemed || ""}
+                        onChange={(e) => setPointsRedeemedDraft(e.target.value.replace(/\D/g, ""))}
+                        onBlur={() => {
+                          if (pointsRedeemedDraft === null) return;
+                          const val = parseOptionalInt(pointsRedeemedDraft, 0, { min: 0, max: customerPoints });
+                          setPointsRedeemed(val);
+                          setPointsRedeemedDraft(null);
+                        }}
+                      />
+                      {pointsRedeemed > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => { setPointsRedeemed(0); setPointsRedeemedDraft(null); }}
+                          className="text-[10px] text-rose-600 hover:underline px-1"
+                        >
+                          Batal
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {pointDiscountAmount > 0 && (
+                    <p className="mt-1 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300 text-right">
+                      Hemat {formatIDR(pointDiscountAmount)} ({pointsRedeemed} Pts x {formatIDR(loyaltyCfg.point_redeem_value)})
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <div className="max-h-[min(480px,58vh)] space-y-3 overflow-auto">
             {cart.length === 0 && <p className="text-sm text-slate-500">Belum ada item</p>}
             {cart.map((c) => {
@@ -1293,6 +1387,12 @@ export default function PosPage() {
                 }}
               />
             </label>
+            {pointDiscountAmount > 0 && (
+              <div className="flex justify-between text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+                <span>Diskon Poin ({pointsRedeemed} Pts)</span>
+                <span>- {formatIDR(pointDiscountAmount)}</span>
+              </div>
+            )}
             <label className="flex justify-between gap-2 text-sm">
               Pajak %
               <input

@@ -880,8 +880,8 @@ app.post(
       await conn.beginTransaction();
       
       const [r] = await conn.query(
-        `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, unit, location, brand, is_active)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, unit, location, brand, reward_points, is_active)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           sku,
           barcode,
@@ -895,6 +895,7 @@ app.post(
           String(b.unit || "PCS").trim() || "PCS",
           b.location != null ? String(b.location).trim() || null : null,
           b.brand != null ? String(b.brand).trim() || null : null,
+          Number(b.reward_points || 0),
           b.is_active === false ? 0 : 1,
         ]
       );
@@ -940,6 +941,7 @@ app.put(
       String(b.unit || "PCS").trim() || "PCS",
       b.location != null ? String(b.location).trim() || null : null,
       b.brand != null ? String(b.brand).trim() || null : null,
+      Number(b.reward_points || 0),
       b.is_active ? 1 : 0,
     ];
     if (stockPart) params.push(Number(b.stock));
@@ -951,7 +953,7 @@ app.put(
 
       await conn.query(
         `UPDATE products SET sku=?, barcode=?, name=?, description=?, supplier_id=?, purchase_price=?, sell_price=?,
-         min_stock=?, unit=?, location=?, brand=?, is_active=?${stockPart} WHERE id=?`,
+         min_stock=?, unit=?, location=?, brand=?, reward_points=?, is_active=?${stockPart} WHERE id=?`,
         params
       );
       await conn.query(`DELETE FROM product_categories WHERE product_id=?`, [req.params.id]);
@@ -1188,6 +1190,54 @@ app.delete(
 );
 
 app.get(
+  "/api/customers/:id/points-history",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, offset } = listPagination(req);
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS * FROM customer_point_logs WHERE customer_id=? ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [req.params.id, limit, offset]
+    );
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    res.json({ data: rows, total, page, limit });
+  })
+);
+
+app.post(
+  "/api/customers/:id/adjust-points",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const { points, type = "adjustment", description } = req.body;
+    const pts = Number(points);
+    if (!pts || isNaN(pts)) throw new Error("Jumlah poin tidak valid");
+    const customerId = req.params.id;
+    
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      if (pts > 0) {
+        await conn.query(`UPDATE customers SET points = points + ? WHERE id=?`, [pts, customerId]);
+      } else {
+        await conn.query(`UPDATE customers SET points = GREATEST(0, points + ?) WHERE id=?`, [pts, customerId]);
+      }
+      await conn.query(
+        `INSERT INTO customer_point_logs (customer_id, type, points, description) VALUES (?,?,?,?)`,
+        [customerId, type, pts, description || "Penyesuaian poin manual"]
+      );
+      await conn.commit();
+      res.json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+app.get(
   "/api/suppliers",
   requireAuth,
   ownerOrAdmin,
@@ -1258,6 +1308,7 @@ async function createPosTransaction(body, userId, conn) {
     payments = [],
     items = [],
     sale_date: rawSaleDate,
+    points_redeemed: rawPointsRedeemed = 0,
   } = body;
   if (!Array.isArray(items) || !items.length) throw new Error("Item kosong");
 
@@ -1266,10 +1317,38 @@ async function createPosTransaction(body, userId, conn) {
       ? String(rawSaleDate).slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
+  // Fetch loyalty settings
+  const [sRows] = await conn.query(
+    `SELECT \`key\`, value FROM settings WHERE \`key\` IN ('loyalty_enabled', 'point_redeem_value', 'default_product_points')`
+  );
+  const settingsObj = {};
+  sRows.forEach((r) => {
+    settingsObj[r.key] = r.value;
+  });
+  const loyaltyEnabled = settingsObj.loyalty_enabled !== "0";
+  const pointRedeemValue = Number(settingsObj.point_redeem_value || 100);
+  const defaultProductPoints = Number(settingsObj.default_product_points || 0);
+
+  let pointsRedeemed = Math.max(0, Number(rawPointsRedeemed) || 0);
+  let pointDiscountAmount = 0;
+
+  if (pointsRedeemed > 0) {
+    if (!loyaltyEnabled) throw new Error("Sistem poin sedang dinonaktifkan");
+    if (!customer_id) throw new Error("Customer wajib dipilih untuk penukaran poin");
+    const [custRows] = await conn.query(`SELECT points FROM customers WHERE id=? FOR UPDATE`, [customer_id]);
+    if (!custRows.length) throw new Error("Customer tidak ditemukan");
+    const currentPoints = Number(custRows[0].points || 0);
+    if (currentPoints < pointsRedeemed) {
+      throw new Error(`Poin pelanggan tidak mencukupi (Tersedia: ${currentPoints}, Ditukar: ${pointsRedeemed})`);
+    }
+    pointDiscountAmount = pointsRedeemed * pointRedeemValue;
+  }
+
   let grossSubtotal = 0;
   let lineDiscountSum = 0;
   let totalCost = 0;
   let totalMargin = 0;
+  let pointsEarned = 0;
   const lineRows = [];
 
   for (const it of items) {
@@ -1278,8 +1357,8 @@ async function createPosTransaction(body, userId, conn) {
     const p = pr[0];
     const qty = Number(it.qty);
     const conv = Number(it.conversion_value || 1);
-    const sell = Number(it.sell_price != null ? it.sell_price : (p.sell_price * conv));
-    const purch = Number(it.purchase_price != null ? it.purchase_price : (p.purchase_price * conv));
+    const sell = Number(it.sell_price != null ? it.sell_price : p.sell_price * conv);
+    const purch = Number(it.purchase_price != null ? it.purchase_price : p.purchase_price * conv);
     const disc = Math.max(0, Number(it.discount_amount || 0));
     const lineSub = sell * qty;
     const lineTotal = lineSub - disc;
@@ -1288,6 +1367,13 @@ async function createPosTransaction(body, userId, conn) {
     lineDiscountSum += disc;
     totalCost += purch * qty;
     totalMargin += marginLine;
+
+    const rewardPts = Number(p.reward_points || 0);
+    const itemPts = rewardPts > 0 ? rewardPts : defaultProductPoints;
+    if (loyaltyEnabled && itemPts > 0) {
+      pointsEarned += itemPts * qty;
+    }
+
     lineRows.push({
       product_id: it.product_id,
       product_name: p.name,
@@ -1306,9 +1392,9 @@ async function createPosTransaction(body, userId, conn) {
   }
 
   const headerDiscount = Math.max(0, Number(discount_total) || 0);
-  const totalDiscount = lineDiscountSum + headerDiscount;
-  const taxAmount = (grossSubtotal - totalDiscount) * (Number(tax_percent) / 100);
-  const grandTotal = grossSubtotal - totalDiscount + taxAmount;
+  const totalDiscount = lineDiscountSum + headerDiscount + pointDiscountAmount;
+  const taxAmount = Math.max(0, (grossSubtotal - totalDiscount) * (Number(tax_percent) / 100));
+  const grandTotal = Math.max(0, grossSubtotal - totalDiscount + taxAmount);
   const totalProfit = grandTotal - totalCost;
 
   const invoice_no = generateInvoiceNo();
@@ -1326,8 +1412,9 @@ async function createPosTransaction(body, userId, conn) {
 
   const [txr] = await conn.query(
     `INSERT INTO transactions (invoice_no, user_id, customer_id, status, subtotal, discount_total, tax_percent, tax_amount,
-      grand_total, total_cost, total_margin, total_profit, notes, sale_date, paid_amount, change_amount)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      grand_total, total_cost, total_margin, total_profit, notes, sale_date, paid_amount, change_amount,
+      points_earned, points_redeemed, point_discount_amount)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       invoice_no,
       userId,
@@ -1345,6 +1432,9 @@ async function createPosTransaction(body, userId, conn) {
       sale_date,
       0,
       0,
+      pointsEarned,
+      pointsRedeemed,
+      pointDiscountAmount,
     ]
   );
   const txId = txr.insertId;
@@ -1450,6 +1540,22 @@ async function createPosTransaction(body, userId, conn) {
     }
     if (customer_id) {
       await conn.query(`UPDATE customers SET total_purchase = total_purchase + ? WHERE id=?`, [grandTotal, customer_id]);
+      if (loyaltyEnabled) {
+        if (pointsRedeemed > 0) {
+          await conn.query(`UPDATE customers SET points = GREATEST(0, points - ?) WHERE id=?`, [pointsRedeemed, customer_id]);
+          await conn.query(
+            `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'redeem',?,?)`,
+            [customer_id, txId, -pointsRedeemed, `Penukaran poin transaksi ${invoice_no}`]
+          );
+        }
+        if (pointsEarned > 0) {
+          await conn.query(`UPDATE customers SET points = points + ? WHERE id=?`, [pointsEarned, customer_id]);
+          await conn.query(
+            `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'earn',?,?)`,
+            [customer_id, txId, pointsEarned, `Perolehan poin transaksi ${invoice_no}`]
+          );
+        }
+      }
     }
   }
 
@@ -1488,6 +1594,23 @@ async function voidCompletedTransaction(conn, txId, row, voidUserId) {
   if (row.customer_id) {
     const gt = Number(row.grand_total);
     await conn.query(`UPDATE customers SET total_purchase = GREATEST(0, total_purchase - ?) WHERE id=?`, [gt, row.customer_id]);
+    
+    const ptsEarned = Number(row.points_earned || 0);
+    const ptsRedeemed = Number(row.points_redeemed || 0);
+    if (ptsEarned > 0) {
+      await conn.query(`UPDATE customers SET points = GREATEST(0, points - ?) WHERE id=?`, [ptsEarned, row.customer_id]);
+      await conn.query(
+        `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'adjustment',?,?)`,
+        [row.customer_id, txId, -ptsEarned, `Pembatalan ${row.invoice_no} (perolehan poin ditarik)`]
+      );
+    }
+    if (ptsRedeemed > 0) {
+      await conn.query(`UPDATE customers SET points = points + ? WHERE id=?`, [ptsRedeemed, row.customer_id]);
+      await conn.query(
+        `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'adjustment',?,?)`,
+        [row.customer_id, txId, ptsRedeemed, `Pembatalan ${row.invoice_no} (poin dikembalikan)`]
+      );
+    }
   }
 
   await conn.query(`DELETE FROM transactions WHERE id=?`, [txId]);
@@ -1514,6 +1637,23 @@ async function voidRefundedTransaction(conn, txId, row) {
   if (row.customer_id) {
     const gt = Number(row.grand_total);
     await conn.query(`UPDATE customers SET total_purchase = GREATEST(0, total_purchase - ?) WHERE id=?`, [gt, row.customer_id]);
+
+    const ptsEarned = Number(row.points_earned || 0);
+    const ptsRedeemed = Number(row.points_redeemed || 0);
+    if (ptsEarned > 0) {
+      await conn.query(`UPDATE customers SET points = GREATEST(0, points - ?) WHERE id=?`, [ptsEarned, row.customer_id]);
+      await conn.query(
+        `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'adjustment',?,?)`,
+        [row.customer_id, txId, -ptsEarned, `Hapus refund ${row.invoice_no} (perolehan poin ditarik)`]
+      );
+    }
+    if (ptsRedeemed > 0) {
+      await conn.query(`UPDATE customers SET points = points + ? WHERE id=?`, [ptsRedeemed, row.customer_id]);
+      await conn.query(
+        `INSERT INTO customer_point_logs (customer_id, transaction_id, type, points, description) VALUES (?,?,'adjustment',?,?)`,
+        [row.customer_id, txId, ptsRedeemed, `Hapus refund ${row.invoice_no} (poin dikembalikan)`]
+      );
+    }
   }
 
   await conn.query(`DELETE FROM transactions WHERE id=?`, [txId]);
@@ -1590,7 +1730,7 @@ app.get(
   kasirOrAdmin,
   asyncHandler(async (req, res) => {
     const [tx] = await pool.query(
-      `SELECT t.*, u.name AS cashier_name, c.name AS customer_name, c.whatsapp AS customer_wa,
+      `SELECT t.*, u.name AS cashier_name, c.name AS customer_name, c.whatsapp AS customer_wa, c.points AS customer_points,
               COALESCE((SELECT SUM(r.amount) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_amount,
               COALESCE((SELECT SUM(r.paid_amount) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_paid_amount,
               COALESCE((SELECT SUM(r.balance) FROM receivables r WHERE r.transaction_id = t.id), 0) AS receivable_balance

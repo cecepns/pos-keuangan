@@ -28,6 +28,10 @@ export function buildThermalReceiptHtml({
   paidSum = 0,
   changeAmount = 0,
   payments = [],
+  customerName = "",
+  pointsEarned = 0,
+  pointsRedeemed = 0,
+  customerPoints = null,
 }) {
   const esc = (s) =>
     String(s ?? "")
@@ -60,6 +64,15 @@ export function buildThermalReceiptHtml({
           .join("")
       : "";
 
+  let pointsHtml = "";
+  if (pointsEarned > 0 || pointsRedeemed > 0 || customerPoints !== null) {
+    pointsHtml += `<hr/><div class="small muted font-bold">INFO POIN LOYALTY</div>`;
+    if (customerName) pointsHtml += `<div class="row small"><span>Pelanggan</span><span>${esc(customerName)}</span></div>`;
+    if (pointsEarned > 0) pointsHtml += `<div class="row small"><span>Poin Dikeluarkan</span><span>+${pointsEarned} Pts</span></div>`;
+    if (pointsRedeemed > 0) pointsHtml += `<div class="row small"><span>Poin Ditukar</span><span>-${pointsRedeemed} Pts</span></div>`;
+    if (customerPoints !== null) pointsHtml += `<div class="row small font-bold"><span>Sisa Poin</span><span>${customerPoints} Pts</span></div>`;
+  }
+
   return `<!DOCTYPE html><html><head><meta charset="utf-8"/><title>Struk</title>
 <style>
   @page { size: ${widthMm}mm auto; margin: 2mm; }
@@ -87,6 +100,7 @@ ${taxPercent > 0 ? `<div class="row muted"><span>Pajak ${taxPercent}%</span><spa
 <div class="row tot"><span>TOTAL</span><span>${formatIDR(grandTotal)}</span></div>
 ${payRows ? `<hr/><div class="small">Bayar:</div>${payRows}` : ""}
 ${changeAmount > 0 ? `<div class="row" style="font-weight:700"><span>Kembalian</span><span>${formatIDR(changeAmount)}</span></div>` : ""}
+${pointsHtml}
 ${footer ? `<hr/><div class="c small">${esc(footer)}</div>` : ""}
 </div><script>window.onload=function(){window.print();}<\/script></body></html>`;
 }
@@ -103,6 +117,9 @@ export function buildReceiptWhatsAppText({
   grandTotal,
   changeAmount,
   payments,
+  pointsEarned = 0,
+  pointsRedeemed = 0,
+  customerPoints = null,
 }) {
   const hdr = `${storeName}\n${invoiceNo} · ${dateStr}\n---\n`;
   const items = lines
@@ -123,6 +140,12 @@ export function buildReceiptWhatsAppText({
   if (payments?.length)
     foot += `\nBayar:\n${payments.map((p) => `- ${p.method}: ${formatIDR(p.amount)}`).join("\n")}`;
   if (changeAmount > 0) foot += `\nKembalian: ${formatIDR(changeAmount)}`;
+  if (pointsEarned > 0 || pointsRedeemed > 0) {
+    foot += `\n---\n*Poin Loyalty*`;
+    if (pointsEarned > 0) foot += `\n+${pointsEarned} Poin Diperoleh`;
+    if (pointsRedeemed > 0) foot += `\n-${pointsRedeemed} Poin Ditukar`;
+    if (customerPoints !== null) foot += `\nSisa Poin: ${customerPoints} Pts`;
+  }
   foot += "\n\nTerima kasih.";
   return hdr + items + foot;
 }
