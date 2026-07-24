@@ -12,7 +12,9 @@ import {
   Plus,
   Minus,
   Tags,
+  Info,
 } from "lucide-react";
+import Select from "react-select";
 import JsBarcode from "jsbarcode";
 import { Html5Qrcode } from "html5-qrcode";
 import api from "../api/client";
@@ -664,6 +666,14 @@ export default function PosPage() {
     const { hint, invoiceLabel = "Keranjang", compact } = opts;
     const pays = receiptPaymentsFromDraft();
     const hasPaymentDetail = pays.length > 0;
+    const [showInfo, setShowInfo] = useState(false);
+
+    const infoMessage = hint || (!hasPaymentDetail && invoiceLabel !== "Keranjang"
+      ? "Isi nominal tunai/transfer/QRIS di atas agar rincian bayar & piutang ikut di pesan WA."
+      : !hasPaymentDetail && invoiceLabel === "Keranjang"
+      ? "Untuk rincian bayar & piutang, buka Bayar dan isi nominal pembayaran dulu."
+      : "Struk belanja akan dikirim via teks pesan WhatsApp.");
+
     return (
       <div
         className={
@@ -672,39 +682,49 @@ export default function PosPage() {
             : "rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20"
         }
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
-          Kirim struk online (WhatsApp)
-        </p>
-        {hint ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{hint}</p> : null}
-        {!hasPaymentDetail && invoiceLabel !== "Keranjang" ? (
-          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
-            Isi nominal tunai/transfer/QRIS di atas agar rincian bayar & piutang ikut di pesan WA.
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+            Kirim Struk WA
           </p>
-        ) : null}
-        {!hasPaymentDetail && invoiceLabel === "Keranjang" ? (
-          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
-            Untuk rincian bayar & piutang, buka <strong>Bayar</strong> dan isi nominal pembayaran dulu.
-          </p>
-        ) : null}
-        <label className="mt-2 block text-xs text-slate-600 dark:text-slate-400">
-          Nomor WA tujuan (otomatis dari pelanggan jika ada)
-        </label>
-        <input
-          type="tel"
-          inputMode="numeric"
-          className="mt-1 w-full rounded-xl border border-emerald-200/80 bg-white px-3 py-2.5 text-base dark:border-emerald-800 dark:bg-slate-950"
-          placeholder="62812… atau 0812…"
-          value={receiptWaPhone}
-          onChange={(e) => setReceiptWaPhone(e.target.value.replace(/[^\d]/g, ""))}
-        />
-        <button
-          type="button"
-          disabled={!cart.length}
-          onClick={() => waNotaToNumber(receiptWaPhone, invoiceLabel)}
-          className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-        >
-          <MessageCircle className="h-4 w-4" /> Kirim teks struk ke WA
-        </button>
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowInfo((v) => !v)}
+              className="text-emerald-700 hover:text-emerald-900 dark:text-emerald-300 dark:hover:text-emerald-100"
+              title="Informasi Struk WA"
+            >
+              <Info className="h-4 w-4" />
+            </button>
+            {showInfo && (
+              <div className="absolute right-0 top-6 z-20 w-56 rounded-xl border border-slate-200 bg-white p-3 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 animate-fade-in">
+                <div className="flex items-start justify-between gap-1 mb-1 font-semibold text-slate-800 dark:text-slate-100">
+                  <span>Info Struk WA</span>
+                  <button type="button" onClick={() => setShowInfo(false)} className="text-slate-400">×</button>
+                </div>
+                <p>{infoMessage}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-2 flex gap-2">
+          <input
+            type="tel"
+            inputMode="numeric"
+            className="w-full rounded-xl border border-emerald-200/80 bg-white px-3 py-2 text-sm dark:border-emerald-800 dark:bg-slate-950"
+            placeholder="No. WA (08... / 628...)"
+            value={receiptWaPhone}
+            onChange={(e) => setReceiptWaPhone(e.target.value.replace(/[^\d]/g, ""))}
+          />
+          <button
+            type="button"
+            disabled={!cart.length}
+            onClick={() => waNotaToNumber(receiptWaPhone, invoiceLabel)}
+            className="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+          >
+            <MessageCircle className="h-4 w-4" /> Kirim
+          </button>
+        </div>
       </div>
     );
   };
@@ -1049,34 +1069,40 @@ export default function PosPage() {
               onChange={(e) => setSaleDate(e.target.value)}
             />
           </div>
-          <div className="mb-3 space-y-2">
-            <label className="text-xs text-slate-500">Pelanggan</label>
-            <input
-              type="search"
-              className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 dark:border-slate-700 dark:bg-slate-950"
-              placeholder="Nama / WhatsApp..."
-              value={customerSearch}
-              onChange={(e) => setCustomerSearch(e.target.value)}
+          <div className="mb-3 space-y-1.5">
+            <label className="text-xs font-medium text-slate-600 dark:text-slate-400">Pelanggan</label>
+            <Select
+              className="text-sm"
+              classNamePrefix="cust"
+              options={[
+                { value: "", label: "Pelanggan Umum" },
+                ...customers.map((c) => ({
+                  value: String(c.id),
+                  label: `${c.name}${c.whatsapp ? ` (${c.whatsapp})` : ""}${c.category ? ` - ${c.category}` : ""}`,
+                })),
+              ]}
+              value={
+                customerId
+                  ? {
+                      value: String(customerId),
+                      label: (() => {
+                        const c = customers.find((x) => String(x.id) === String(customerId));
+                        return c
+                          ? `${c.name}${c.whatsapp ? ` (${c.whatsapp})` : ""}${c.category ? ` - ${c.category}` : ""}`
+                          : "Pelanggan Terpilih";
+                      })(),
+                    }
+                  : { value: "", label: "Pelanggan Umum" }
+              }
+              onChange={(opt) => setCustomerId(opt?.value || "")}
+              onInputChange={(val) => setCustomerSearch(val)}
+              placeholder="Cari / Pilih Pelanggan..."
+              isClearable={false}
+              menuPortalTarget={typeof document !== "undefined" ? document.body : null}
+              styles={{
+                menuPortal: (base) => ({ ...base, zIndex: 10000 }),
+              }}
             />
-            <div className="flex flex-wrap gap-1">
-              <button
-                type="button"
-                className={`rounded-lg px-2 py-1 text-xs ${!customerId ? "bg-brand-600 text-white" : "bg-slate-100 dark:bg-slate-800"}`}
-                onClick={() => setCustomerId("")}
-              >
-                Umum
-              </button>
-              {customers.map((c) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  className={`rounded-lg px-2 py-1 text-xs ${String(customerId) === String(c.id) ? "bg-brand-600 text-white" : "bg-slate-100 dark:bg-slate-800"}`}
-                  onClick={() => setCustomerId(String(c.id))}
-                >
-                  {c.name}
-                </button>
-              ))}
-            </div>
           </div>
           <div className="max-h-[min(480px,58vh)] space-y-3 overflow-auto">
             {cart.length === 0 && <p className="text-sm text-slate-500">Belum ada item</p>}
