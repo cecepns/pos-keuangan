@@ -2,7 +2,7 @@
  * POS Keuangan - Backend tunggal (Express + MySQL)
  * Jalankan dari folder server: npm install && cp .env.example .env && npm start
  */
-require("dotenv").config({ path: require("path").join(__dirname, ".env") });
+// require("dotenv").config({ path: require("path").join(__dirname, ".env") });
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
@@ -12,10 +12,10 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const multer = require("multer");
 
-const PORT = Number(process.env.PORT || 4000);
-const JWT_SECRET = process.env.JWT_SECRET || "dev-insecure-secret-change-me";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
-const UPLOAD_DIR = process.env.UPLOAD_DIR || path.join(__dirname, "uploads");
+const PORT = 8080;
+const JWT_SECRET = "dev-insecure-secret-change-me";
+const JWT_EXPIRES_IN = "360d";
+const UPLOAD_DIR = path.join(__dirname, "uploads");
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 
@@ -28,25 +28,23 @@ function unlinkProductImageFile(imagePathRel) {
   if (!base || base.includes("..") || base.includes("/") || base.includes("\\")) return;
   const abs = path.resolve(UPLOAD_DIR, base);
   if (!abs.startsWith(path.resolve(UPLOAD_DIR))) return;
-  fs.unlink(abs, () => {});
+  fs.unlink(abs, () => { });
 }
 
 const pool = mysql.createPool({
-  host: process.env.DB_HOST || "127.0.0.1",
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "",
-  database: process.env.DB_NAME || "pos_keuangan",
+  host: "localhost",
+  user: "sekt3835_sekargumilang",
+  password: "sekt3835_sekargumilang",
+  database: "sekt3835_sekargumilang",
   waitForConnections: true,
   connectionLimit: 10,
   namedPlaceholders: true,
-  /** DATE/DATETIME sebagai 'YYYY-MM-DD' / string — hindari ISO UTC di JSON yang membingungkan filter tanggal (WIB). */
-  dateStrings: true,
 });
 
 const app = express();
 app.use(cors({ origin: true, credentials: true }));
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "20mb" }));
+
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, UPLOAD_DIR),
@@ -70,7 +68,7 @@ function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-/** Default 10 baris/halaman; client boleh minta hingga MAX_PAGE_SIZE (10/25/50/100) */
+/** Semua GET daftar tabel: maksimal 10 baris per halaman (override limit dibatasi) */
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 100;
 
@@ -784,7 +782,24 @@ app.get(
       [...params, limit, offset]
     );
     const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
-    res.json({ data: rows, total, page, limit });
+
+    const productIds = rows.map((r) => r.id);
+    let units = [];
+    let prices = [];
+    if (productIds.length > 0) {
+      const [uRows] = await pool.query(`SELECT * FROM product_units WHERE product_id IN (?)`, [productIds]);
+      units = uRows;
+      const [pRows] = await pool.query(`SELECT * FROM product_prices WHERE product_id IN (?)`, [productIds]);
+      prices = pRows;
+    }
+
+    const data = rows.map((p) => ({
+      ...p,
+      units: units.filter((u) => u.product_id === p.id),
+      prices: prices.filter((pr) => pr.product_id === p.id),
+    }));
+
+    res.json({ data, total, page, limit });
   })
 );
 
@@ -799,9 +814,56 @@ app.get(
       `SELECT c.id, c.name FROM product_categories pc JOIN categories c ON c.id=pc.category_id WHERE pc.product_id=?`,
       [req.params.id]
     );
-    res.json({ ...rows[0], category_ids: cats.map((c) => c.id) });
+    const [units] = await pool.query(`SELECT * FROM product_units WHERE product_id=?`, [req.params.id]);
+    const [prices] = await pool.query(`SELECT * FROM product_prices WHERE product_id=?`, [req.params.id]);
+    res.json({ ...rows[0], category_ids: cats.map((c) => c.id), units, prices });
   })
 );
+
+async function saveProductUnitsAndPrices(productId, baseUnitName, units, prices, conn) {
+  await conn.query(`DELETE FROM product_prices WHERE product_id = ?`, [productId]);
+  await conn.query(`DELETE FROM product_units WHERE product_id = ?`, [productId]);
+
+  const unitNameToIdMap = {};
+
+  if (Array.isArray(units)) {
+    for (const u of units) {
+      const [r] = await conn.query(
+        `INSERT INTO product_units (product_id, unit_name, conversion_value, purchase_price, sell_price, barcode)
+         VALUES (?,?,?,?,?,?)`,
+        [
+          productId,
+          String(u.unit_name || "").trim(),
+          Number(u.conversion_value || 1),
+          Number(u.purchase_price || 0),
+          Number(u.sell_price || 0),
+          u.barcode ? String(u.barcode).trim() : null
+        ]
+      );
+      unitNameToIdMap[String(u.unit_name).trim().toLowerCase()] = r.insertId;
+    }
+  }
+
+  if (Array.isArray(prices)) {
+    for (const pr of prices) {
+      const uName = String(pr.unit_name || "").trim().toLowerCase();
+      let unitId = null;
+      if (uName && uName !== String(baseUnitName || "").trim().toLowerCase()) {
+        unitId = unitNameToIdMap[uName] || null;
+      }
+      await conn.query(
+        `INSERT INTO product_prices (product_id, product_unit_id, customer_category, price)
+         VALUES (?,?,?,?)`,
+        [
+          productId,
+          unitId,
+          String(pr.customer_category || "umum").trim(),
+          Number(pr.price || 0)
+        ]
+      );
+    }
+  }
+}
 
 app.post(
   "/api/products",
@@ -812,32 +874,47 @@ app.post(
     const sku = String(b.sku || "").trim() || `SKU-${Date.now()}`;
     let barcode = b.barcode ? String(b.barcode).trim() : null;
     if (!barcode) barcode = `899${String(Date.now()).slice(-9)}`;
-    const [r] = await pool.query(
-      `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, unit, location, brand, is_active)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        sku,
-        barcode,
-        b.name,
-        b.description || null,
-        b.supplier_id || null,
-        Number(b.purchase_price || 0),
-        Number(b.sell_price || 0),
-        Number(b.stock || 0),
-        Number(b.min_stock || 0),
-        String(b.unit || "PCS").trim() || "PCS",
-        b.location != null ? String(b.location).trim() || null : null,
-        b.brand != null ? String(b.brand).trim() || null : null,
-        b.is_active === false ? 0 : 1,
-      ]
-    );
-    const pid = r.insertId;
-    if (Array.isArray(b.category_ids)) {
-      for (const cid of b.category_ids) {
-        await pool.query(`INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)`, [pid, cid]);
+    
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      
+      const [r] = await conn.query(
+        `INSERT INTO products (sku, barcode, name, description, supplier_id, purchase_price, sell_price, stock, min_stock, unit, location, brand, is_active)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          sku,
+          barcode,
+          b.name,
+          b.description || null,
+          b.supplier_id || null,
+          Number(b.purchase_price || 0),
+          Number(b.sell_price || 0),
+          Number(b.stock || 0),
+          Number(b.min_stock || 0),
+          String(b.unit || "PCS").trim() || "PCS",
+          b.location != null ? String(b.location).trim() || null : null,
+          b.brand != null ? String(b.brand).trim() || null : null,
+          b.is_active === false ? 0 : 1,
+        ]
+      );
+      const pid = r.insertId;
+      if (Array.isArray(b.category_ids)) {
+        for (const cid of b.category_ids) {
+          await conn.query(`INSERT IGNORE INTO product_categories (product_id, category_id) VALUES (?,?)`, [pid, cid]);
+        }
       }
+      
+      await saveProductUnitsAndPrices(pid, b.unit || "PCS", b.units, b.prices, conn);
+      
+      await conn.commit();
+      res.status(201).json({ id: pid, barcode });
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
     }
-    res.status(201).json({ id: pid, barcode });
   })
 );
 
@@ -867,18 +944,33 @@ app.put(
     ];
     if (stockPart) params.push(Number(b.stock));
     params.push(req.params.id);
-    await pool.query(
-      `UPDATE products SET sku=?, barcode=?, name=?, description=?, supplier_id=?, purchase_price=?, sell_price=?,
-       min_stock=?, unit=?, location=?, brand=?, is_active=?${stockPart} WHERE id=?`,
-      params
-    );
-    await pool.query(`DELETE FROM product_categories WHERE product_id=?`, [req.params.id]);
-    if (Array.isArray(b.category_ids)) {
-      for (const cid of b.category_ids) {
-        await pool.query(`INSERT INTO product_categories (product_id, category_id) VALUES (?,?)`, [req.params.id, cid]);
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+
+      await conn.query(
+        `UPDATE products SET sku=?, barcode=?, name=?, description=?, supplier_id=?, purchase_price=?, sell_price=?,
+         min_stock=?, unit=?, location=?, brand=?, is_active=?${stockPart} WHERE id=?`,
+        params
+      );
+      await conn.query(`DELETE FROM product_categories WHERE product_id=?`, [req.params.id]);
+      if (Array.isArray(b.category_ids)) {
+        for (const cid of b.category_ids) {
+          await conn.query(`INSERT INTO product_categories (product_id, category_id) VALUES (?,?)`, [req.params.id, cid]);
+        }
       }
+
+      await saveProductUnitsAndPrices(req.params.id, b.unit || "PCS", b.units, b.prices, conn);
+
+      await conn.commit();
+      res.json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
     }
-    res.json({ ok: true });
   })
 );
 
@@ -1185,8 +1277,9 @@ async function createPosTransaction(body, userId, conn) {
     if (!pr.length) throw new Error(`Produk ${it.product_id} tidak ada`);
     const p = pr[0];
     const qty = Number(it.qty);
-    const sell = Number(it.sell_price != null ? it.sell_price : p.sell_price);
-    const purch = Number(p.purchase_price);
+    const conv = Number(it.conversion_value || 1);
+    const sell = Number(it.sell_price != null ? it.sell_price : (p.sell_price * conv));
+    const purch = Number(it.purchase_price != null ? it.purchase_price : (p.purchase_price * conv));
     const disc = Math.max(0, Number(it.discount_amount || 0));
     const lineSub = sell * qty;
     const lineTotal = lineSub - disc;
@@ -1198,7 +1291,7 @@ async function createPosTransaction(body, userId, conn) {
     lineRows.push({
       product_id: it.product_id,
       product_name: p.name,
-      barcode: p.barcode,
+      barcode: it.barcode || p.barcode,
       purchase_price: purch,
       sell_price: sell,
       qty,
@@ -1207,6 +1300,8 @@ async function createPosTransaction(body, userId, conn) {
       line_total: lineTotal,
       margin_amount: marginLine,
       stock_available: p.stock,
+      unit_name: String(it.unit_name || p.unit || "PCS"),
+      conversion_value: conv,
     });
   }
 
@@ -1221,7 +1316,8 @@ async function createPosTransaction(body, userId, conn) {
   if (status === "completed") {
     for (const lr of lineRows) {
       const [pr] = await conn.query(`SELECT stock FROM products WHERE id=? FOR UPDATE`, [lr.product_id]);
-      if (pr[0].stock < lr.qty) throw new Error(`Stok tidak cukup: ${lr.product_name}`);
+      const deductQty = lr.qty * lr.conversion_value;
+      if (pr[0].stock < deductQty) throw new Error(`Stok tidak cukup: ${lr.product_name}`);
     }
   }
 
@@ -1253,8 +1349,8 @@ async function createPosTransaction(body, userId, conn) {
   for (const lr of lineRows) {
     await conn.query(
       `INSERT INTO transaction_items (transaction_id, product_id, product_name, barcode, purchase_price, sell_price, qty,
-        discount_amount, subtotal, line_total, margin_amount)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+        discount_amount, subtotal, line_total, margin_amount, unit_name, conversion_value)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         txId,
         lr.product_id,
@@ -1267,6 +1363,8 @@ async function createPosTransaction(body, userId, conn) {
         lr.subtotal,
         lr.line_total,
         lr.margin_amount,
+        lr.unit_name,
+        lr.conversion_value,
       ]
     );
   }
@@ -1339,11 +1437,12 @@ async function createPosTransaction(body, userId, conn) {
 
   if (status === "completed") {
     for (const lr of lineRows) {
-      await conn.query(`UPDATE products SET stock = stock - ? WHERE id=?`, [lr.qty, lr.product_id]);
+      const deductQty = lr.qty * lr.conversion_value;
+      await conn.query(`UPDATE products SET stock = stock - ? WHERE id=?`, [deductQty, lr.product_id]);
       await conn.query(
-        `INSERT INTO stock_movements (product_id, type, qty, reference_type, reference_id, created_by)
-         VALUES (?,'sale',?, 'transaction', ?, ?)`,
-        [lr.product_id, lr.qty, txId, userId]
+        `INSERT INTO stock_movements (product_id, type, qty, reference_type, reference_id, created_by, notes)
+         VALUES (?,'sale',?, 'transaction', ?, ?, ?)`,
+        [lr.product_id, deductQty, txId, userId, `Sold ${lr.qty} ${lr.unit_name}`]
       );
     }
     if (customer_id) {
@@ -2697,6 +2796,7 @@ app.post(
   })
 );
 
+
 // ==================================// ==========================================
 // CATALOG & SOCIAL MEDIA FEATURE ENDPOINTS (WITH catalog PREFIX)
 // ==========================================
@@ -2788,16 +2888,16 @@ app.get(
     const q = String(req.query.q || "").trim();
     const catId = req.query.category_id ? Number(req.query.category_id) : null;
     const subCatId = req.query.subcategory_id ? Number(req.query.subcategory_id) : null;
-    
+
     let where = "WHERE p.is_active = 1";
     const params = [];
-    
+
     if (q) {
       where += " AND (p.name LIKE ? OR p.description LIKE ?)";
       const qq = `%${q}%`;
       params.push(qq, qq);
     }
-    
+
     if (subCatId) {
       where += " AND p.subcategory_id = ?";
       params.push(subCatId);
@@ -2814,9 +2914,9 @@ app.get(
        LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
-    
+
     const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
-    
+
     for (const row of rows) {
       const [imgs] = await pool.query(
         `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
@@ -2824,7 +2924,7 @@ app.get(
       );
       row.images = imgs;
     }
-    
+
     res.json({
       success: true,
       data: rows,
@@ -2882,7 +2982,7 @@ app.get(
       `SELECT \`key\`, value FROM settings WHERE \`key\` IN (?)`,
       [keys]
     );
-    
+
     const result = {
       ig: "",
       tiktok: "",
@@ -2890,7 +2990,7 @@ app.get(
       youtube: "",
       wa: [],
     };
-    
+
     for (const row of rows) {
       if (row.key === "catalog_ig") result.ig = row.value;
       else if (row.key === "catalog_tiktok") result.tiktok = row.value;
@@ -2904,7 +3004,7 @@ app.get(
         }
       }
     }
-    
+
     res.json({
       success: true,
       data: result
@@ -2929,7 +3029,7 @@ app.get(
       const qq = `%${q}%`;
       params.push(qq, qq, qq);
     }
-    
+
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS * FROM catalog_categories ${where} ORDER BY name LIMIT ? OFFSET ?`,
       [...params, limit, offset]
@@ -2975,7 +3075,7 @@ app.put(
     const name = String(req.body.name || "").trim();
     if (!name) return res.status(400).json({ error: "Nama wajib" });
     const code = req.body.code != null ? String(req.body.code).trim() || null : null;
-    
+
     await pool.query(
       `UPDATE catalog_categories SET name=?, code=?, slug=? WHERE id=?`,
       [
@@ -3011,7 +3111,7 @@ app.get(
     const { page, limit, offset } = catalogListPagination(req);
     const q = String(req.query.q || "").trim();
     const catId = req.query.category_id ? Number(req.query.category_id) : null;
-    
+
     let where = "WHERE 1=1";
     const params = [];
     if (q) {
@@ -3023,7 +3123,7 @@ app.get(
       where += " AND s.category_id = ?";
       params.push(catId);
     }
-    
+
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS s.*, c.name AS category_name
        FROM catalog_subcategories s
@@ -3058,7 +3158,7 @@ app.post(
     if (!name) return res.status(400).json({ error: "Nama wajib" });
     if (!category_id) return res.status(400).json({ error: "Kategori induk wajib" });
     const code = req.body.code != null ? String(req.body.code).trim() || null : null;
-    
+
     const [r] = await pool.query(
       `INSERT INTO catalog_subcategories (category_id, name, code, slug) VALUES (?, ?, ?, ?)`,
       [
@@ -3083,7 +3183,7 @@ app.put(
     if (!name) return res.status(400).json({ error: "Nama wajib" });
     if (!category_id) return res.status(400).json({ error: "Kategori induk wajib" });
     const code = req.body.code != null ? String(req.body.code).trim() || null : null;
-    
+
     await pool.query(
       `UPDATE catalog_subcategories SET category_id=?, name=?, code=?, slug=? WHERE id=?`,
       [
@@ -3130,7 +3230,7 @@ app.get(
       where += " AND p.is_active = ?";
       params.push(Number(req.query.active));
     }
-    
+
     const [rows] = await pool.query(
       `SELECT SQL_CALC_FOUND_ROWS p.*, c.name AS category_name, s.name AS subcategory_name
        FROM catalog_products p
@@ -3141,7 +3241,7 @@ app.get(
       [...params, limit, offset]
     );
     const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
-    
+
     for (const row of rows) {
       const [imgs] = await pool.query(
         `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
@@ -3150,7 +3250,7 @@ app.get(
       row.images = imgs;
       row.categories = [row.category_name, row.subcategory_name].filter(Boolean).join(" > ");
     }
-    
+
     res.json({
       success: true,
       data: rows,
@@ -3212,7 +3312,7 @@ app.post(
     if (!barcode) barcode = `899${String(Date.now()).slice(-9)}`;
     const category_id = Number(b.category_id);
     const subcategory_id = b.subcategory_id ? Number(b.subcategory_id) : null;
-    
+
     if (!category_id) return res.status(400).json({ error: "Kategori wajib dipilih" });
 
     const sortOrder =
@@ -3250,7 +3350,7 @@ app.put(
     const b = req.body;
     const category_id = Number(b.category_id);
     const subcategory_id = b.subcategory_id ? Number(b.subcategory_id) : null;
-    
+
     if (!category_id) return res.status(400).json({ error: "Kategori wajib dipilih" });
 
     const sortOrder =
@@ -3301,17 +3401,17 @@ app.delete(
   asyncHandler(async (req, res) => {
     const [rows] = await pool.query(`SELECT image_path FROM catalog_products WHERE id=?`, [req.params.id]);
     if (!rows.length) return res.status(404).json({ error: "Produk tidak ada" });
-    
+
     const [imgs] = await pool.query(`SELECT image_path FROM catalog_product_images WHERE product_id=?`, [req.params.id]);
-    
+
     await pool.query(`DELETE FROM catalog_products WHERE id=?`, [req.params.id]);
-    
+
     // Delete multiple catalog images from disk
     for (const img of imgs) {
       const absPath = path.join(__dirname, img.image_path);
-      fs.unlink(absPath, () => {});
+      fs.unlink(absPath, () => { });
     }
-    
+
     unlinkProductImageFile(rows[0].image_path);
     res.json({ success: true });
   })
@@ -3327,7 +3427,7 @@ app.post(
     const productId = Number(req.params.id);
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "File gambar wajib" });
-    
+
     const inserted = [];
     for (const file of files) {
       const rel = `/uploads-catalog-sekargumilang/${file.filename}`;
@@ -3379,7 +3479,7 @@ app.delete(
   asyncHandler(async (req, res) => {
     const productId = Number(req.params.id);
     const imageId = Number(req.params.imageId);
-    
+
     const [[img]] = await pool.query(
       `SELECT image_path FROM catalog_product_images WHERE id=? AND product_id=?`,
       [imageId, productId]
@@ -3389,7 +3489,7 @@ app.delete(
     await pool.query(`DELETE FROM catalog_product_images WHERE id=?`, [imageId]);
 
     const absPath = path.join(__dirname, img.image_path);
-    fs.unlink(absPath, () => {});
+    fs.unlink(absPath, () => { });
 
     await syncCatalogProductPrimaryImage(productId);
 
@@ -3404,7 +3504,7 @@ app.put(
   requireRoles("admin", "owner"),
   asyncHandler(async (req, res) => {
     const { ig, tiktok, fb, youtube, wa } = req.body;
-    
+
     const updates = [
       { key: "catalog_ig", value: String(ig || "").trim() },
       { key: "catalog_tiktok", value: String(tiktok || "").trim() },
@@ -3412,7 +3512,7 @@ app.put(
       { key: "catalog_youtube", value: String(youtube || "").trim() },
       { key: "catalog_wa", value: JSON.stringify(Array.isArray(wa) ? wa : []) },
     ];
-    
+
     for (const item of updates) {
       await pool.query(
         `INSERT INTO settings (\`key\`, value) VALUES (?, ?) 
@@ -3420,10 +3520,11 @@ app.put(
         [item.key, item.value, item.value]
       );
     }
-    
+
     res.json({ success: true });
   })
 );
+
 
 app.use((err, _req, res, _next) => {
   console.error(err);
