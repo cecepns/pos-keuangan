@@ -5,7 +5,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import api from "../api/client";
 import { fetchAllPages } from "../api/fetchAllPages";
 import { PAGE_SIZE } from "../constants/pagination";
-import { formatDateID, formatIDR } from "../utils/format";
+import { formatIDR, formatReportDateCell } from "../utils/format";
 import { PAGE_TABLE, PAGE_TABLE_WRAP, PageStack } from "../components/TableCard";
 import { PaginationBar } from "../components/PaginationBar";
 import { Modal } from "../components/Modal";
@@ -291,18 +291,16 @@ export default function OperationalExpensePage() {
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {rows.map((r) => {
-                  const locked = r.reference && String(r.reference).startsWith("trx:");
+                  const trxLocked = r.reference && String(r.reference).startsWith("trx:");
                   return (
                     <tr key={r.id}>
-                      <td className="px-4 py-3">{formatDateID(r.flow_date)}</td>
+                      <td className="px-4 py-3">{formatReportDateCell(r.flow_date)}</td>
                       <td className="px-4 py-3 text-sm">{r.expense_category_name || "—"}</td>
                       <td className="px-4 py-3 text-right">{formatIDR(r.amount)}</td>
                       <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-400">{r.description}</td>
                       <td className="px-4 py-3 text-right">
-                        {locked ? (
-                          <span className="text-xs text-slate-400">—</span>
-                        ) : (
-                          <div className="flex justify-end gap-1">
+                        <div className="flex justify-end gap-1">
+                          {!trxLocked ? (
                             <button
                               type="button"
                               className="rounded-lg p-2 text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-950/30"
@@ -311,16 +309,16 @@ export default function OperationalExpensePage() {
                             >
                               <Pencil className="h-4 w-4" />
                             </button>
-                            <button
-                              type="button"
-                              className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
-                              title="Hapus"
-                              onClick={() => setDeleteId(r.id)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        )}
+                          ) : null}
+                          <button
+                            type="button"
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            title="Hapus"
+                            onClick={() => setDeleteId(r.id)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

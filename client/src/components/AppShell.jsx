@@ -162,10 +162,13 @@ const nav = [
 
 function canAccessNavItem(user, item) {
   if (!user?.role_name) return false;
+  const perms = user.permissions || [];
+  const hasAll = perms.includes("all");
+  // Izin dari server (RBAC) mengesampingkan daftar role statik, agar mis. kasir + "laporan" tetap melihat menu.
+  if (item.perm && (hasAll || perms.includes(item.perm))) return true;
   if (!item.roles.includes(user.role_name)) return false;
-  const perms = user.permissions;
-  if (!perms || perms.length === 0) return true;
-  if (perms.includes("all")) return true;
+  if (!perms.length) return true;
+  if (hasAll) return true;
   return item.perm ? perms.includes(item.perm) : true;
 }
 

@@ -386,7 +386,7 @@ export default function TransactionsPage() {
       <div className={PAGE_TABLE_WRAP}>
         {loading ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={6} />
+            <TableSkeleton rows={6} cols={7} />
           </div>
         ) : (
           <table className={PAGE_TABLE_WIDE}>
@@ -394,6 +394,7 @@ export default function TransactionsPage() {
               <tr>
                 <th className="px-4 py-3 text-left">Invoice</th>
                 <th className="px-4 py-3 text-left">Tgl transaksi</th>
+                <th className="px-4 py-3 text-left">Kasir</th>
                 <th className="px-4 py-3 text-left">Pelanggan</th>
                 <th className="px-4 py-3 text-right">Total</th>
                 <th className="px-4 py-3 text-left">Status</th>
@@ -405,6 +406,7 @@ export default function TransactionsPage() {
                 <tr key={x.id}>
                   <td className="px-4 py-3 font-mono text-xs">{x.invoice_no}</td>
                   <td className="px-4 py-3">{displayTxDate(x)}</td>
+                  <td className="px-4 py-3">{x.cashier_name || "—"}</td>
                   <td className="px-4 py-3">{x.customer_name || "—"}</td>
                   <td className="px-4 py-3 text-right">{formatIDR(x.grand_total)}</td>
                   <td className="px-4 py-3">

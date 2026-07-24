@@ -37,6 +37,7 @@ export default function PosPage() {
   const [products, setProducts] = useState([]);
   const [productPage, setProductPage] = useState(1);
   const [productTotal, setProductTotal] = useState(0);
+  const [inactiveHint, setInactiveHint] = useState(null);
   const [cart, setCart] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [cashAccounts, setCashAccounts] = useState([]);
@@ -91,6 +92,20 @@ export default function PosPage() {
       setProductTotal(tot);
       if (append) setProducts((prev) => [...prev, ...rows]);
       else setProducts(rows);
+
+      if (!append && rows.length === 0 && dq.trim()) {
+        try {
+          const { data: all } = await api.get("/api/products", {
+            params: { q: dq, limit: 1, page: 1 },
+          });
+          const hit = (all.data || [])[0];
+          setInactiveHint(hit && Number(hit.is_active) === 0 ? hit : null);
+        } catch {
+          setInactiveHint(null);
+        }
+      } else if (!append) {
+        setInactiveHint(null);
+      }
     },
     [dq]
   );
@@ -500,7 +515,7 @@ export default function PosPage() {
     w.document.close();
   }
 
-  function waNotaToNumber(phoneDigits) {
+  function waNotaToNumber(phoneDigits, invoiceNo = "Keranjang") {
     const wa = normalizeWhatsAppPhone(phoneDigits);
     if (!wa) {
       toast.error("Isi nomor WhatsApp tujuan");
@@ -512,7 +527,7 @@ export default function PosPage() {
     const text = encodeURIComponent(
       buildReceiptWhatsAppText({
         storeName: receiptCfg.store_name,
-        invoiceNo: "Keranjang",
+        invoiceNo,
         dateStr: saleDate,
         lines: cart,
         subtotal,
@@ -527,15 +542,79 @@ export default function PosPage() {
     window.open(`https://wa.me/${wa}?text=${text}`, "_blank");
   }
 
+  const receiptWaShareBlock = (opts = {}) => {
+    const { hint, invoiceLabel = "Keranjang", compact } = opts;
+    const pays = receiptPaymentsFromDraft();
+    const hasPaymentDetail = pays.length > 0;
+    return (
+      <div
+        className={
+          compact
+            ? "rounded-xl border border-emerald-100 bg-emerald-50/80 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20"
+            : "rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20"
+        }
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+          Kirim struk online (WhatsApp)
+        </p>
+        {hint ? <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">{hint}</p> : null}
+        {!hasPaymentDetail && invoiceLabel !== "Keranjang" ? (
+          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+            Isi nominal tunai/transfer/QRIS di atas agar rincian bayar & piutang ikut di pesan WA.
+          </p>
+        ) : null}
+        {!hasPaymentDetail && invoiceLabel === "Keranjang" ? (
+          <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+            Untuk rincian bayar & piutang, buka <strong>Bayar</strong> dan isi nominal pembayaran dulu.
+          </p>
+        ) : null}
+        <label className="mt-2 block text-xs text-slate-600 dark:text-slate-400">
+          Nomor WA tujuan (otomatis dari pelanggan jika ada)
+        </label>
+        <input
+          type="tel"
+          inputMode="numeric"
+          className="mt-1 w-full rounded-xl border border-emerald-200/80 bg-white px-3 py-2.5 text-base dark:border-emerald-800 dark:bg-slate-950"
+          placeholder="62812… atau 0812…"
+          value={receiptWaPhone}
+          onChange={(e) => setReceiptWaPhone(e.target.value.replace(/[^\d]/g, ""))}
+        />
+        <button
+          type="button"
+          disabled={!cart.length}
+          onClick={() => waNotaToNumber(receiptWaPhone, invoiceLabel)}
+          className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
+        >
+          <MessageCircle className="h-4 w-4" /> Kirim teks struk ke WA
+        </button>
+      </div>
+    );
+  };
+
   const resolveScannedCode = useCallback(
     async (rawCode) => {
       const code = String(rawCode || "").trim();
       if (!code) return false;
-      let found = products.find((p) => p.barcode === code);
+      let found = products.find((p) => p.barcode === code || p.sku === code);
       if (!found) {
         try {
           const { data } = await api.get("/api/products", { params: { q: code, limit: PAGE_SIZE, active: 1 } });
-          found = (data.data || []).find((p) => p.barcode === code) || data.data?.[0];
+          found =
+            (data.data || []).find((p) => p.barcode === code || p.sku === code) || data.data?.[0];
+        } catch {
+          /* */
+        }
+      }
+      if (!found) {
+        try {
+          const { data } = await api.get("/api/products", { params: { q: code, limit: 5 } });
+          const inactive =
+            (data.data || []).find((p) => (p.barcode === code || p.sku === code) && Number(p.is_active) === 0) ||
+            (data.data || []).find((p) => Number(p.is_active) === 0);
+          if (inactive) {
+            toast.error(`"${inactive.name}" nonaktif — aktifkan di halaman Produk`);
+            return false;
+          }
         } catch {
           /* */
         }
@@ -761,6 +840,12 @@ export default function PosPage() {
           </div>
           </div>
           <div className="max-h-[min(420px,50vh)] overflow-y-auto rounded-2xl border border-slate-100 dark:border-slate-800">
+            {inactiveHint && (
+              <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                <strong>{inactiveHint.name}</strong> ({inactiveHint.sku}) ditemukan tapi <strong>nonaktif</strong>.
+                Aktifkan produk di halaman Produk agar muncul di POS.
+              </div>
+            )}
             <div className="grid gap-2 p-2 sm:grid-cols-2">
               {products.map((p) => {
                 const left = availableOnGrid(p);
@@ -1048,26 +1133,7 @@ export default function PosPage() {
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-            <div className="rounded-2xl border border-emerald-100 bg-emerald-50/80 p-3 dark:border-emerald-900/40 dark:bg-emerald-950/20">
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">Kirim struk online (WhatsApp)</p>
-              <label className="mt-2 block text-xs text-slate-600 dark:text-slate-400">Nomor WA tujuan (otomatis dari pelanggan jika ada)</label>
-              <input
-                type="tel"
-                inputMode="numeric"
-                className="mt-1 w-full rounded-xl border border-emerald-200/80 bg-white px-3 py-2.5 text-base dark:border-emerald-800 dark:bg-slate-950"
-                placeholder="62812… atau 0812…"
-                value={receiptWaPhone}
-                onChange={(e) => setReceiptWaPhone(e.target.value.replace(/[^\d]/g, ""))}
-              />
-              <button
-                type="button"
-                disabled={!cart.length}
-                onClick={() => waNotaToNumber(receiptWaPhone)}
-                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-2.5 text-sm font-semibold text-white disabled:opacity-50"
-              >
-                <MessageCircle className="h-4 w-4" /> Kirim teks struk ke WA
-              </button>
-            </div>
+            {receiptWaShareBlock({ invoiceLabel: "Keranjang" })}
             <button
               type="button"
               onClick={() => setPayOpen(true)}
@@ -1239,6 +1305,11 @@ export default function PosPage() {
             Kosongkan nominal
           </button>
         </div>
+        {receiptWaShareBlock({
+          compact: true,
+          invoiceLabel: "Preview pembayaran",
+          hint: "Struk mencakup item keranjang + rincian tunai/transfer/QRIS/piutang sesuai nominal di atas.",
+        })}
         <div className="mt-4 flex justify-end gap-2">
           <button type="button" className="rounded-xl border px-4 py-2" onClick={() => setPayOpen(false)}>
             Batal

@@ -311,13 +311,14 @@ export default function ProductsPage() {
       <div className={`${PAGE_TABLE_WRAP} overflow-x-auto`}>
         {loading ? (
           <div className="p-4">
-            <TableSkeleton rows={6} cols={13} />
+            <TableSkeleton rows={6} cols={14} />
           </div>
         ) : (
           <table className={`${PAGE_TABLE} min-w-[1040px] divide-y divide-slate-100 text-sm dark:divide-slate-800`}>
             <thead className="bg-slate-50 dark:bg-slate-800/80">
               <tr>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">SKU</th>
+                <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Status</th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Aksi</th>
                 <th className="whitespace-nowrap px-4 py-3 text-left font-semibold">Foto</th>
                 <th className="min-w-[8rem] px-4 py-3 text-left font-semibold">Nama</th>
@@ -334,8 +335,19 @@ export default function ProductsPage() {
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-800">
               {list.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} className={Number(p.is_active) === 0 ? "opacity-60" : ""}>
                   <td className="px-4 py-3 font-mono text-xs text-slate-600 dark:text-slate-400">{p.sku}</td>
+                  <td className="px-4 py-3">
+                    {Number(p.is_active) === 0 ? (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                        Nonaktif
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200">
+                        Aktif
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-nowrap justify-end gap-1">
                       <button type="button" className="rounded-lg p-2 hover:bg-slate-100 dark:hover:bg-slate-800" onClick={() => printBarcode(p)}>

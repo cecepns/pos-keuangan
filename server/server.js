@@ -40,6 +40,8 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   namedPlaceholders: true,
+  /** DATE/DATETIME sebagai 'YYYY-MM-DD' / string — hindari ISO UTC di JSON yang membingungkan filter tanggal (WIB). */
+  dateStrings: true,
 });
 
 const app = express();
@@ -68,13 +70,23 @@ function asyncHandler(fn) {
   return (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 }
 
-/** Semua GET daftar tabel: maksimal 10 baris per halaman (override limit dibatasi) */
-const MAX_PAGE_SIZE = 10;
+/** Default 10 baris/halaman; client boleh minta hingga MAX_PAGE_SIZE (10/25/50/100) */
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
 
 function listPagination(req) {
   const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
-  const raw = parseInt(String(req.query.limit ?? String(MAX_PAGE_SIZE)), 10);
-  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number.isFinite(raw) && raw > 0 ? raw : MAX_PAGE_SIZE));
+  const raw = parseInt(String(req.query.limit ?? String(DEFAULT_PAGE_SIZE)), 10);
+  const limit = Math.min(MAX_PAGE_SIZE, Math.max(1, Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_PAGE_SIZE));
+  const offset = (page - 1) * limit;
+  return { page, limit, offset };
+}
+
+/** Pagination katalog admin — selalu izinkan hingga 100 baris (tidak terikat cap global lama) */
+function catalogListPagination(req) {
+  const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+  const raw = parseInt(String(req.query.limit ?? String(DEFAULT_PAGE_SIZE)), 10);
+  const limit = Math.min(100, Math.max(1, Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_PAGE_SIZE));
   const offset = (page - 1) * limit;
   return { page, limit, offset };
 }
@@ -162,6 +174,42 @@ function ownerOrAdmin(req, res, next) {
   return requireRoles("admin", "owner")(req, res, next);
 }
 
+/** Laporan: admin/owner, atau role lain dengan izin menu `reports` (selaras PermGate + sidebar). */
+function reportsOrOwnerAdmin(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  const r = req.user.role_name;
+  if (r === "admin" || r === "owner") return next();
+  const perms = req.user.permissions || [];
+  if (perms.includes("all") || perms.includes("reports")) return next();
+  return res.status(403).json({ error: "Forbidden" });
+}
+
+/** Role dengan salah satu izin menu (atau admin/owner). */
+function permOrOwnerAdmin(...codes) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+    const r = req.user.role_name;
+    if (r === "admin" || r === "owner") return next();
+    const perms = req.user.permissions || [];
+    if (perms.includes("all") || codes.some((c) => perms.includes(c))) return next();
+    return res.status(403).json({ error: "Forbidden" });
+  };
+}
+
+/** Cash flow: admin/owner, atau izin menu `cashflow` (selaras PermGate + UsersPage). */
+function cashflowOrOwnerAdmin(req, res, next) {
+  return permOrOwnerAdmin("cashflow")(req, res, next);
+}
+
+/** Pengguna & mapping izin role: admin, atau non-admin dengan izin `users`. */
+function adminOrUsersPerm(req, res, next) {
+  if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+  if (req.user.role_name === "admin") return next();
+  const perms = req.user.permissions || [];
+  if (perms.includes("all") || perms.includes("users")) return next();
+  return res.status(403).json({ error: "Forbidden" });
+}
+
 app.use(authMiddleware);
 
 app.get("/api/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
@@ -200,7 +248,7 @@ app.get(
 app.get(
   "/api/users",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const q = String(req.query.q || "").trim();
@@ -224,10 +272,13 @@ app.get(
 app.post(
   "/api/users",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (req, res) => {
     const { name, email, password, role_id, store_id } = req.body;
     if (!name || !email || !password || !role_id) return res.status(400).json({ error: "Data tidak lengkap" });
+    if (Number(role_id) === 1 && req.user.role_name !== "admin") {
+      return res.status(403).json({ error: "Hanya admin yang boleh menambah pengguna dengan role admin" });
+    }
     const hash = await bcrypt.hash(String(password), 10);
     const [r] = await pool.query(`INSERT INTO users (role_id, store_id, name, email, password_hash) VALUES (?,?,?,?,?)`, [
       role_id,
@@ -243,11 +294,21 @@ app.post(
 app.put(
   "/api/users/:id",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const { name, email, role_id, store_id, is_active, password } = req.body;
     if (!name || !email || !role_id) return res.status(400).json({ error: "Nama, email, dan role wajib" });
+    if (Number(role_id) === 1 && req.user.role_name !== "admin") {
+      return res.status(403).json({ error: "Hanya admin yang boleh menetapkan role admin" });
+    }
+    if (req.user.role_name !== "admin") {
+      const [[existing]] = await pool.query(`SELECT role_id FROM users WHERE id=?`, [id]);
+      if (!existing) return res.status(404).json({ error: "Pengguna tidak ditemukan" });
+      if (Number(existing.role_id) === 1) {
+        return res.status(403).json({ error: "Hanya admin yang boleh mengubah akun admin" });
+      }
+    }
     const fields = [`name=?`, `email=?`, `role_id=?`, `store_id=?`, `is_active=?`];
     const vals = [name, String(email).toLowerCase(), role_id, store_id || null, is_active === false ? 0 : 1];
     if (password && String(password).length >= 4) {
@@ -260,10 +321,43 @@ app.put(
   })
 );
 
+app.delete(
+  "/api/users/:id",
+  requireAuth,
+  adminOrUsersPerm,
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "ID tidak valid" });
+    if (id === req.user.id) return res.status(400).json({ error: "Tidak dapat menghapus akun sendiri" });
+
+    const [[u]] = await pool.query(`SELECT id, role_id FROM users WHERE id=?`, [id]);
+    if (!u) return res.status(404).json({ error: "Pengguna tidak ditemukan" });
+
+    if (Number(u.role_id) === 1 && req.user.role_name !== "admin") {
+      return res.status(403).json({ error: "Hanya admin yang boleh menghapus akun admin" });
+    }
+
+    if (Number(u.role_id) === 1) {
+      const [[{ c }]] = await pool.query(`SELECT COUNT(*) AS c FROM users WHERE role_id = 1`);
+      if (Number(c) <= 1) return res.status(400).json({ error: "Tidak dapat menghapus admin terakhir" });
+    }
+
+    const [[{ tx }]] = await pool.query(`SELECT COUNT(*) AS tx FROM transactions WHERE user_id=?`, [id]);
+    if (Number(tx) > 0) {
+      return res.status(409).json({
+        error: "Pengguna punya riwayat transaksi. Nonaktifkan akun jika tidak perlu login lagi.",
+      });
+    }
+
+    await pool.query(`DELETE FROM users WHERE id=?`, [id]);
+    res.json({ ok: true });
+  })
+);
+
 app.get(
   "/api/permissions",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (_req, res) => {
     const [rows] = await pool.query(`SELECT id, code, description FROM permissions ORDER BY code`);
     res.json({ data: rows });
@@ -273,7 +367,7 @@ app.get(
 app.get(
   "/api/roles/:id/permissions",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (req, res) => {
     const roleId = Number(req.params.id);
     const [rows] = await pool.query(
@@ -288,9 +382,12 @@ app.get(
 app.put(
   "/api/roles/:id/permissions",
   requireAuth,
-  requireRoles("admin"),
+  adminOrUsersPerm,
   asyncHandler(async (req, res) => {
     const roleId = Number(req.params.id);
+    if (roleId === 1 && req.user.role_name !== "admin") {
+      return res.status(403).json({ error: "Hanya admin yang boleh mengubah izin role admin" });
+    }
     const codes = Array.isArray(req.body.codes) ? req.body.codes.map(String) : [];
     const conn = await pool.getConnection();
     try {
@@ -338,6 +435,32 @@ app.get(
   })
 );
 
+/** Rentang tanggal dashboard: ?from=&to= (YYYY-MM-DD), maks 366 hari. */
+function dashboardDateRange(query) {
+  const re = /^\d{4}-\d{2}-\d{2}$/;
+  let f = re.test(String(query.from || "")) ? String(query.from).slice(0, 10) : null;
+  let t = re.test(String(query.to || "")) ? String(query.to).slice(0, 10) : null;
+  if (!f && !t) return null;
+  if (f && !t) t = f;
+  if (t && !f) f = t;
+  if (!f || !t) return null;
+  if (f > t) [f, t] = [t, f];
+  const dayCount =
+    Math.round((new Date(`${t}T12:00:00`).getTime() - new Date(`${f}T12:00:00`).getTime()) / 86400000) + 1;
+  if (dayCount > 366) return null;
+  return { from: f, to: t, dayCount };
+}
+
+function addCalendarDaysIso(iso, deltaDays) {
+  const [yy, mm, dd] = iso.split("-").map(Number);
+  const d = new Date(yy, mm - 1, dd);
+  d.setDate(d.getDate() + deltaDays);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 app.get(
   "/api/dashboard/summary",
   requireAuth,
@@ -350,23 +473,56 @@ app.get(
     const d = today.getDate();
     const dateStr = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-    const [[todaySales]] = await pool.query(
-      `SELECT COALESCE(SUM(grand_total),0) AS omzet,
-              COALESCE(SUM(total_profit),0) AS profit,
-              COUNT(*) AS trx_count,
-              COALESCE(SUM((SELECT SUM(qty) FROM transaction_items ti WHERE ti.transaction_id = transactions.id)),0) AS items_sold
-       FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) = ?`,
-      [dateStr]
-    );
+    const range = dashboardDateRange(req.query);
+    const dateExpr = "COALESCE(sale_date, DATE(created_at))";
 
-    const [[monthCompare]] = await pool.query(
-      `SELECT
+    let todaySales;
+    let monthCompare;
+
+    if (range) {
+      const prevEnd = addCalendarDaysIso(range.from, -1);
+      const prevStart = addCalendarDaysIso(range.from, -range.dayCount);
+      const [[ts]] = await pool.query(
+        `SELECT COALESCE(SUM(grand_total),0) AS omzet,
+                COALESCE(SUM(total_profit),0) AS profit,
+                COUNT(*) AS trx_count,
+                COALESCE(SUM((SELECT SUM(qty) FROM transaction_items ti WHERE ti.transaction_id = transactions.id)),0) AS items_sold
+         FROM transactions WHERE status='completed' AND ${dateExpr} BETWEEN ? AND ?`,
+        [range.from, range.to]
+      );
+      todaySales = ts;
+
+      const [[mc]] = await pool.query(
+        `SELECT
+          COALESCE(SUM(CASE WHEN ${dateExpr} BETWEEN ? AND ? THEN grand_total END),0) AS omzet_now,
+          COALESCE(SUM(CASE WHEN ${dateExpr} BETWEEN ? AND ? THEN grand_total END),0) AS omzet_prev,
+          COALESCE(SUM(CASE WHEN ${dateExpr} BETWEEN ? AND ? THEN total_margin END),0) AS margin_now,
+          COALESCE(SUM(CASE WHEN ${dateExpr} BETWEEN ? AND ? THEN total_margin END),0) AS margin_prev
+         FROM transactions WHERE status='completed'`,
+        [range.from, range.to, prevStart, prevEnd, range.from, range.to, prevStart, prevEnd]
+      );
+      monthCompare = mc;
+    } else {
+      const [[ts]] = await pool.query(
+        `SELECT COALESCE(SUM(grand_total),0) AS omzet,
+                COALESCE(SUM(total_profit),0) AS profit,
+                COUNT(*) AS trx_count,
+                COALESCE(SUM((SELECT SUM(qty) FROM transaction_items ti WHERE ti.transaction_id = transactions.id)),0) AS items_sold
+         FROM transactions WHERE status='completed' AND ${dateExpr} = ?`,
+        [dateStr]
+      );
+      todaySales = ts;
+
+      const [[mc]] = await pool.query(
+        `SELECT
         COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(CURDATE()) AND MONTH(COALESCE(sale_date, created_at))=MONTH(CURDATE()) THEN grand_total END),0) AS omzet_now,
         COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(COALESCE(sale_date, created_at))=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN grand_total END),0) AS omzet_prev,
         COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(CURDATE()) AND MONTH(COALESCE(sale_date, created_at))=MONTH(CURDATE()) THEN total_margin END),0) AS margin_now,
         COALESCE(SUM(CASE WHEN YEAR(COALESCE(sale_date, created_at))=YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) AND MONTH(COALESCE(sale_date, created_at))=MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)) THEN total_margin END),0) AS margin_prev
        FROM transactions WHERE status='completed'`
-    );
+      );
+      monthCompare = mc;
+    }
 
     let cashFlow = { in: 0, out: 0 };
     let debtSummary = { piutang: 0, hutang: 0 };
@@ -374,12 +530,14 @@ app.get(
     let bestSeller = [];
 
     if (role !== "kasir" || true) {
+      const cfParams = range ? [range.from, range.to] : [dateStr];
+      const cfWhere = range ? "flow_date BETWEEN ? AND ?" : "flow_date = ?";
       const [[cf]] = await pool.query(
         `SELECT
           COALESCE(SUM(CASE WHEN type IN ('in','transfer_in') THEN amount END),0) AS cin,
           COALESCE(SUM(CASE WHEN type IN ('out','transfer_out') THEN amount END),0) AS cout
-         FROM cash_flows WHERE flow_date = ?`,
-        [dateStr]
+         FROM cash_flows WHERE ${cfWhere}`,
+        cfParams
       );
       cashFlow = { in: Number(cf.cin), out: Number(cf.cout) };
 
@@ -392,8 +550,21 @@ app.get(
       );
       lowStock = ls;
 
-      const [bs] = await pool.query(
-        `SELECT p.id, p.name, SUM(ti.qty) AS qty, SUM(ti.line_total) AS revenue
+      if (range) {
+        const [bs] = await pool.query(
+          `SELECT p.id, p.name, SUM(ti.qty) AS qty, SUM(ti.line_total) AS revenue
+           FROM transaction_items ti
+           JOIN products p ON p.id = ti.product_id
+           JOIN transactions t ON t.id = ti.transaction_id
+           WHERE t.status='completed'
+             AND COALESCE(t.sale_date, DATE(t.created_at)) BETWEEN ? AND ?
+           GROUP BY p.id ORDER BY qty DESC LIMIT 8`,
+          [range.from, range.to]
+        );
+        bestSeller = bs;
+      } else {
+        const [bs] = await pool.query(
+          `SELECT p.id, p.name, SUM(ti.qty) AS qty, SUM(ti.line_total) AS revenue
          FROM transaction_items ti
          JOIN products p ON p.id = ti.product_id
          JOIN transactions t ON t.id = ti.transaction_id
@@ -401,25 +572,47 @@ app.get(
            AND YEAR(COALESCE(t.sale_date, t.created_at)) = YEAR(CURDATE())
            AND MONTH(COALESCE(t.sale_date, t.created_at)) = MONTH(CURDATE())
          GROUP BY p.id ORDER BY qty DESC LIMIT 8`
-      );
-      bestSeller = bs;
+        );
+        bestSeller = bs;
+      }
     }
 
-    const [salesSeries] = await pool.query(
-      `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(grand_total) AS total
+    let salesSeries;
+    let profitSeries;
+    if (range) {
+      const [ss] = await pool.query(
+        `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(grand_total) AS total
+         FROM transactions WHERE status='completed' AND ${dateExpr} BETWEEN ? AND ?
+         GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`,
+        [range.from, range.to]
+      );
+      salesSeries = ss;
+      const [ps] = await pool.query(
+        `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(total_profit) AS total
+         FROM transactions WHERE status='completed' AND ${dateExpr} BETWEEN ? AND ?
+         GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`,
+        [range.from, range.to]
+      );
+      profitSeries = ps;
+    } else {
+      const [ss] = await pool.query(
+        `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(grand_total) AS total
        FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
        GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`
-    );
-
-    const [profitSeries] = await pool.query(
-      `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(total_profit) AS total
+      );
+      salesSeries = ss;
+      const [ps] = await pool.query(
+        `SELECT COALESCE(sale_date, DATE(created_at)) AS d, SUM(total_profit) AS total
        FROM transactions WHERE status='completed' AND COALESCE(sale_date, DATE(created_at)) >= DATE_SUB(CURDATE(), INTERVAL 14 DAY)
        GROUP BY COALESCE(sale_date, DATE(created_at)) ORDER BY d`
-    );
+      );
+      profitSeries = ps;
+    }
 
     const kasirSimple = role === "kasir";
 
     res.json({
+      filter: range ? { from: range.from, to: range.to } : null,
       today: {
         omzet: Number(todaySales.omzet),
         profit: Number(todaySales.profit),
@@ -507,7 +700,7 @@ app.delete(
 app.get(
   "/api/income-categories",
   requireAuth,
-  ownerOrAdmin,
+  cashflowOrOwnerAdmin,
   asyncHandler(async (_req, res) => {
     const [rows] = await pool.query(`SELECT id, name FROM income_categories ORDER BY name`);
     res.json({ data: rows });
@@ -517,7 +710,7 @@ app.get(
 app.get(
   "/api/expense-categories",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses", "expense_categories"),
   asyncHandler(async (_req, res) => {
     const [rows] = await pool.query(`SELECT id, name, type FROM expense_categories ORDER BY name`);
     res.json({ data: rows });
@@ -981,7 +1174,8 @@ async function createPosTransaction(body, userId, conn) {
       ? String(rawSaleDate).slice(0, 10)
       : new Date().toISOString().slice(0, 10);
 
-  let subtotal = 0;
+  let grossSubtotal = 0;
+  let lineDiscountSum = 0;
   let totalCost = 0;
   let totalMargin = 0;
   const lineRows = [];
@@ -993,11 +1187,12 @@ async function createPosTransaction(body, userId, conn) {
     const qty = Number(it.qty);
     const sell = Number(it.sell_price != null ? it.sell_price : p.sell_price);
     const purch = Number(p.purchase_price);
-    const disc = Number(it.discount_amount || 0);
+    const disc = Math.max(0, Number(it.discount_amount || 0));
     const lineSub = sell * qty;
     const lineTotal = lineSub - disc;
     const marginLine = (sell - purch) * qty - disc;
-    subtotal += lineSub;
+    grossSubtotal += lineSub;
+    lineDiscountSum += disc;
     totalCost += purch * qty;
     totalMargin += marginLine;
     lineRows.push({
@@ -1015,8 +1210,10 @@ async function createPosTransaction(body, userId, conn) {
     });
   }
 
-  const taxAmount = (subtotal - Number(discount_total)) * (Number(tax_percent) / 100);
-  const grandTotal = subtotal - Number(discount_total) + taxAmount;
+  const headerDiscount = Math.max(0, Number(discount_total) || 0);
+  const totalDiscount = lineDiscountSum + headerDiscount;
+  const taxAmount = (grossSubtotal - totalDiscount) * (Number(tax_percent) / 100);
+  const grandTotal = grossSubtotal - totalDiscount + taxAmount;
   const totalProfit = grandTotal - totalCost;
 
   const invoice_no = generateInvoiceNo();
@@ -1037,8 +1234,8 @@ async function createPosTransaction(body, userId, conn) {
       userId,
       customer_id || null,
       status,
-      subtotal,
-      Number(discount_total),
+      grossSubtotal,
+      totalDiscount,
       Number(tax_percent),
       taxAmount,
       grandTotal,
@@ -1157,6 +1354,69 @@ async function createPosTransaction(body, userId, conn) {
   return { id: txId, invoice_no, grand_total: grandTotal, change_amount: changeAmount };
 }
 
+/** Hapus transaksi selesai: balik kas (cash_flows trx:), stok, total belanja pelanggan; receivable harus lunas. */
+async function voidCompletedTransaction(conn, txId, row, voidUserId) {
+  const [[recv]] = await conn.query(
+    `SELECT COALESCE(SUM(balance),0) AS b FROM receivables WHERE transaction_id=?`,
+    [txId]
+  );
+  if (Number(recv.b) > 0.02) throw new Error("Masih ada sisa piutang — lunasi dulu atau gunakan refund.");
+
+  const ref = `trx:${txId}`;
+  const [flows] = await conn.query(`SELECT cash_account_id, amount FROM cash_flows WHERE reference=?`, [ref]);
+  for (const f of flows) {
+    await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [Number(f.amount), f.cash_account_id]);
+  }
+  if (flows.length) await conn.query(`DELETE FROM cash_flows WHERE reference=?`, [ref]);
+
+  await conn.query(`DELETE FROM receivables WHERE transaction_id=?`, [txId]);
+
+  await conn.query(`DELETE FROM stock_movements WHERE reference_type IN ('transaction','refund') AND reference_id=?`, [txId]);
+
+  const [items] = await conn.query(`SELECT * FROM transaction_items WHERE transaction_id=?`, [txId]);
+  for (const it of items) {
+    await conn.query(`UPDATE products SET stock = stock + ? WHERE id=?`, [it.qty, it.product_id]);
+    await conn.query(
+      `INSERT INTO stock_movements (product_id, type, qty, reference_type, reference_id, notes, created_by)
+       VALUES (?,'adjustment',?, 'void_tx', ?, ?, ?)`,
+      [it.product_id, it.qty, txId, `Hapus transaksi ${row.invoice_no}`, voidUserId]
+    );
+  }
+
+  if (row.customer_id) {
+    const gt = Number(row.grand_total);
+    await conn.query(`UPDATE customers SET total_purchase = GREATEST(0, total_purchase - ?) WHERE id=?`, [gt, row.customer_id]);
+  }
+
+  await conn.query(`DELETE FROM transactions WHERE id=?`, [txId]);
+}
+
+/** Hapus transaksi sudah refund: stok sudah dikembalikan saat refund — hanya balik kas & total belanja. */
+async function voidRefundedTransaction(conn, txId, row) {
+  const [[recv]] = await conn.query(
+    `SELECT COALESCE(SUM(balance),0) AS b FROM receivables WHERE transaction_id=?`,
+    [txId]
+  );
+  if (Number(recv.b) > 0.02) throw new Error("Masih ada sisa piutang tercatat — tidak bisa hapus.");
+
+  const ref = `trx:${txId}`;
+  const [flows] = await conn.query(`SELECT cash_account_id, amount FROM cash_flows WHERE reference=?`, [ref]);
+  for (const f of flows) {
+    await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [Number(f.amount), f.cash_account_id]);
+  }
+  if (flows.length) await conn.query(`DELETE FROM cash_flows WHERE reference=?`, [ref]);
+
+  await conn.query(`DELETE FROM receivables WHERE transaction_id=?`, [txId]);
+  await conn.query(`DELETE FROM stock_movements WHERE reference_type IN ('transaction','refund') AND reference_id=?`, [txId]);
+
+  if (row.customer_id) {
+    const gt = Number(row.grand_total);
+    await conn.query(`UPDATE customers SET total_purchase = GREATEST(0, total_purchase - ?) WHERE id=?`, [gt, row.customer_id]);
+  }
+
+  await conn.query(`DELETE FROM transactions WHERE id=?`, [txId]);
+}
+
 app.post(
   "/api/transactions",
   requireAuth,
@@ -1254,12 +1514,48 @@ app.delete(
   requireAuth,
   kasirOrAdmin,
   asyncHandler(async (req, res) => {
-    const [tx] = await pool.query(`SELECT id, status FROM transactions WHERE id=?`, [req.params.id]);
-    if (!tx.length) return res.status(404).json({ error: "Transaksi tidak ada" });
-    if (!["draft", "hold"].includes(String(tx[0].status)))
-      return res.status(400).json({ error: "Hanya transaksi draft atau hold yang bisa dihapus" });
-    await pool.query(`DELETE FROM transactions WHERE id=?`, [req.params.id]);
-    res.json({ ok: true });
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id < 1) return res.status(400).json({ error: "ID tidak valid" });
+
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [txRows] = await conn.query(`SELECT * FROM transactions WHERE id=? FOR UPDATE`, [id]);
+      if (!txRows.length) {
+        await conn.rollback();
+        return res.status(404).json({ error: "Transaksi tidak ada" });
+      }
+      const row = txRows[0];
+      const status = String(row.status);
+
+      if (["draft", "hold"].includes(status)) {
+        await conn.query(`DELETE FROM transactions WHERE id=?`, [id]);
+        await conn.commit();
+        return res.json({ ok: true });
+      }
+
+      if (!["admin", "owner"].includes(req.user.role_name)) {
+        await conn.rollback();
+        return res.status(403).json({ error: "Hapus transaksi selesai/refund hanya untuk admin atau owner" });
+      }
+
+      if (status === "completed") {
+        await voidCompletedTransaction(conn, id, row, req.user.id);
+      } else if (status === "refunded") {
+        await voidRefundedTransaction(conn, id, row);
+      } else {
+        await conn.rollback();
+        return res.status(400).json({ error: `Transaksi status "${status}" tidak bisa dihapus` });
+      }
+
+      await conn.commit();
+      res.json({ ok: true });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message || "Gagal menghapus" });
+    } finally {
+      conn.release();
+    }
   })
 );
 
@@ -1302,30 +1598,131 @@ app.get(
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const q = String(req.query.q || "").trim();
+    let mf = String(req.query.mutasi_from || "").trim();
+    let mt = String(req.query.mutasi_to || "").trim();
+    const usePeriod =
+      /^\d{4}-\d{2}-\d{2}$/.test(mf) && /^\d{4}-\d{2}-\d{2}$/.test(mt);
+    if (usePeriod && mf > mt) [mf, mt] = [mt, mf];
+    const toD = usePeriod ? mt : null;
+
     let where = "WHERE 1=1";
-    const params = [];
+    const whereParams = [];
     if (q) {
-      where += " AND (name LIKE ? OR type LIKE ?)";
+      where += " AND (ca.name LIKE ? OR ca.type LIKE ?)";
       const qq = `%${q}%`;
-      params.push(qq, qq);
+      whereParams.push(qq, qq);
     }
     const includeInactive = String(req.query.all || "") === "1" || String(req.query.all || "") === "true";
     if (!includeInactive) {
-      where += " AND COALESCE(is_active,1)=1";
+      where += " AND COALESCE(ca.is_active,1)=1";
     }
+
+    const mutasiQ = String(req.query.mutasi_q || "").trim();
+    if (usePeriod) {
+      if (mutasiQ) {
+        const qqm = `%${mutasiQ}%`;
+        where += ` AND EXISTS (
+          SELECT 1 FROM cash_flows cfx
+          WHERE cfx.cash_account_id = ca.id
+            AND cfx.flow_date BETWEEN ? AND ?
+            AND (cfx.description LIKE ? OR cfx.reference LIKE ? OR ca.name LIKE ?)
+        )`;
+        whereParams.push(mf, mt, qqm, qqm, qqm);
+      } else {
+        where += ` AND EXISTS (
+          SELECT 1 FROM cash_flows cfx
+          WHERE cfx.cash_account_id = ca.id
+            AND cfx.flow_date BETWEEN ? AND ?
+        )`;
+        whereParams.push(mf, mt);
+      }
+    }
+
+    const signedFlow = (alias) =>
+      `CASE ${alias}.type WHEN 'in' THEN ${alias}.amount WHEN 'transfer_in' THEN ${alias}.amount WHEN 'out' THEN -${alias}.amount WHEN 'transfer_out' THEN -${alias}.amount ELSE 0 END`;
+
+    const balanceForPeriodSql = usePeriod
+      ? `, (ca.balance - COALESCE((
+          SELECT SUM(${signedFlow("cf")})
+          FROM cash_flows cf
+          WHERE cf.cash_account_id = ca.id AND cf.flow_date > ?
+        ), 0)) AS balance_for_period`
+      : "";
+
+    const mutasiNetSql = usePeriod
+      ? mutasiQ
+        ? `, (SELECT COALESCE(SUM(${signedFlow("cfn")}), 0)
+            FROM cash_flows cfn
+            WHERE cfn.cash_account_id = ca.id
+              AND cfn.flow_date BETWEEN ? AND ?
+              AND (cfn.description LIKE ? OR cfn.reference LIKE ? OR ca.name LIKE ?)
+           ) AS mutasi_net_period`
+        : `, (SELECT COALESCE(SUM(${signedFlow("cfn")}), 0)
+            FROM cash_flows cfn
+            WHERE cfn.cash_account_id = ca.id
+              AND cfn.flow_date BETWEEN ? AND ?
+           ) AS mutasi_net_period`
+      : "";
+
+    /** Urutan ? mengikuti teks SQL kiri-ke-kanan: subquery SELECT dulu, lalu WHERE, lalu LIMIT. */
+    const selectParams = [];
+    if (usePeriod) {
+      selectParams.push(toD);
+      if (mutasiQ) {
+        const qqm = `%${mutasiQ}%`;
+        selectParams.push(mf, mt, qqm, qqm, qqm);
+      } else {
+        selectParams.push(mf, mt);
+      }
+    }
+
     const [rows] = await pool.query(
-      `SELECT SQL_CALC_FOUND_ROWS * FROM cash_accounts ${where} ORDER BY id LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      `SELECT SQL_CALC_FOUND_ROWS ca.*${balanceForPeriodSql}${mutasiNetSql}
+       FROM cash_accounts ca
+       ${where} ORDER BY ca.id LIMIT ? OFFSET ?`,
+      [...selectParams, ...whereParams, limit, offset]
     );
     const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
     res.json({ data: rows, total, page, limit });
   })
 );
 
+/** Saldo per rekening pada akhir tanggal `as_of` (inklusif), dari saldo kini dikurangi mutasi setelah tanggal itu. */
+app.get(
+  "/api/cash-accounts/summary-as-of",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const asOf = String(req.query.as_of || "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+      return res.status(400).json({ error: "Parameter as_of (YYYY-MM-DD) wajib" });
+    }
+    const [rows] = await pool.query(
+      `SELECT ca.id, ca.name, ca.type,
+        (ca.balance - COALESCE(SUM(
+          CASE cf.type
+            WHEN 'in' THEN cf.amount
+            WHEN 'transfer_in' THEN cf.amount
+            WHEN 'out' THEN -cf.amount
+            WHEN 'transfer_out' THEN -cf.amount
+            ELSE 0
+          END
+        ), 0)) AS balance_as_of
+       FROM cash_accounts ca
+       LEFT JOIN cash_flows cf ON cf.cash_account_id = ca.id AND cf.flow_date > ?
+       WHERE COALESCE(ca.is_active,1)=1
+       GROUP BY ca.id, ca.name, ca.type, ca.balance
+       ORDER BY ca.name`,
+      [asOf]
+    );
+    res.json({ data: rows, as_of: asOf });
+  })
+);
+
 app.post(
   "/api/cash-accounts",
   requireAuth,
-  requireRoles("admin", "owner"),
+  cashflowOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const b = req.body;
     const type = ["kas", "bank", "ewallet"].includes(String(b.type)) ? b.type : "kas";
@@ -1341,7 +1738,7 @@ app.post(
 app.put(
   "/api/cash-accounts/:id",
   requireAuth,
-  requireRoles("admin", "owner"),
+  cashflowOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const b = req.body;
@@ -1362,7 +1759,7 @@ app.put(
 app.delete(
   "/api/cash-accounts/:id",
   requireAuth,
-  requireRoles("admin", "owner"),
+  cashflowOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const [rows] = await pool.query(`SELECT id FROM cash_accounts WHERE id=?`, [id]);
@@ -1375,7 +1772,7 @@ app.delete(
 app.get(
   "/api/cash-flows/next-code",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses"),
   asyncHandler(async (_req, res) => {
     const [[r]] = await pool.query(`SELECT LPAD(IFNULL(MAX(id),0)+1, 6, '0') AS code FROM cash_flows`);
     res.json({ code: r.code });
@@ -1385,21 +1782,21 @@ app.get(
 app.get(
   "/api/cash-flows",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses"),
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     let where = "WHERE 1=1";
     const params = [];
     if (req.query.from) {
-      where += " AND flow_date >= ?";
+      where += " AND cf.flow_date >= ?";
       params.push(req.query.from);
     }
     if (req.query.to) {
-      where += " AND flow_date <= ?";
+      where += " AND cf.flow_date <= ?";
       params.push(req.query.to);
     }
     if (req.query.account_id) {
-      where += " AND cash_account_id=?";
+      where += " AND cf.cash_account_id=?";
       params.push(req.query.account_id);
     }
     if (req.query.type) {
@@ -1430,7 +1827,7 @@ app.get(
 app.post(
   "/api/cash-flows",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses"),
   asyncHandler(async (req, res) => {
     const b = req.body;
     const conn = await pool.getConnection();
@@ -1488,7 +1885,7 @@ app.post(
 app.put(
   "/api/cash-flows/:id",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses"),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const b = req.body;
@@ -1560,10 +1957,35 @@ app.put(
   })
 );
 
+/** Pasangan transfer_in / transfer_out (dicatat berpasangan tanpa reference). */
+async function findTransferPair(conn, row) {
+  if (row.type !== "transfer_out" && row.type !== "transfer_in") return null;
+  const pairType = row.type === "transfer_out" ? "transfer_in" : "transfer_out";
+  const [pairs] = await conn.query(
+    `SELECT * FROM cash_flows
+     WHERE type=? AND amount=? AND flow_date=? AND created_by <=> ?
+       AND id != ?
+       AND ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) <= 10
+     ORDER BY ABS(TIMESTAMPDIFF(SECOND, created_at, ?)) ASC
+     LIMIT 1`,
+    [pairType, row.amount, row.flow_date, row.created_by, row.id, row.created_at, row.created_at]
+  );
+  return pairs[0] || null;
+}
+
+function reverseCashFlowBalance(conn, flowRow) {
+  const amt = Number(flowRow.amount);
+  const accId = flowRow.cash_account_id;
+  if (flowRow.type === "in" || flowRow.type === "transfer_in") {
+    return conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [amt, accId]);
+  }
+  return conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [amt, accId]);
+}
+
 app.delete(
   "/api/cash-flows/:id",
   requireAuth,
-  ownerOrAdmin,
+  permOrOwnerAdmin("cashflow", "expenses"),
   asyncHandler(async (req, res) => {
     const id = Number(req.params.id);
     const conn = await pool.getConnection();
@@ -1575,18 +1997,17 @@ app.delete(
         return res.status(404).json({ error: "Aliran kas tidak ada" });
       }
       const row = rows[0];
-      if (row.type !== "in" && row.type !== "out") {
-        throw new Error("Hanya jenis masuk atau keluar yang dapat dihapus");
+      const pair = await findTransferPair(conn, row);
+      const accIds = [...new Set([Number(row.cash_account_id), pair ? Number(pair.cash_account_id) : null].filter(Boolean))].sort(
+        (a, b) => a - b
+      );
+      for (const aid of accIds) {
+        await conn.query(`SELECT id FROM cash_accounts WHERE id=? FOR UPDATE`, [aid]);
       }
-      if (row.reference && String(row.reference).startsWith("trx:")) {
-        throw new Error("Aliran dari penjualan tidak dapat dihapus dari sini");
-      }
-
-      await conn.query(`SELECT id FROM cash_accounts WHERE id=? FOR UPDATE`, [row.cash_account_id]);
-      if (row.type === "out") {
-        await conn.query(`UPDATE cash_accounts SET balance = balance + ? WHERE id=?`, [row.amount, row.cash_account_id]);
-      } else {
-        await conn.query(`UPDATE cash_accounts SET balance = balance - ? WHERE id=?`, [row.amount, row.cash_account_id]);
+      await reverseCashFlowBalance(conn, row);
+      if (pair) {
+        await reverseCashFlowBalance(conn, pair);
+        await conn.query(`DELETE FROM cash_flows WHERE id=?`, [pair.id]);
       }
       await conn.query(`DELETE FROM cash_flows WHERE id=?`, [id]);
       await conn.commit();
@@ -1728,6 +2149,9 @@ app.post(
       const [p] = await conn.query(`SELECT * FROM payables WHERE id=? FOR UPDATE`, [req.params.id]);
       if (!p.length) throw new Error("Not found");
       const row = p[0];
+      const maxPay = Number(row.balance);
+      if (!Number.isFinite(amt) || amt <= 0) throw new Error("Jumlah bayar tidak valid");
+      if (amt > maxPay + 0.01) throw new Error("Jumlah bayar melebihi sisa hutang");
       const newPaid = Number(row.paid_amount) + amt;
       const bal = Number(row.amount) - newPaid;
       await conn.query(`UPDATE payables SET paid_amount=?, balance=?, status=? WHERE id=?`, [
@@ -1761,9 +2185,60 @@ app.post(
 );
 
 app.get(
-  "/api/reports/sales",
+  "/api/supplier-purchases",
   requireAuth,
   ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, offset } = listPagination(req);
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS sp.*, s.name AS supplier_name
+       FROM supplier_purchases sp
+       JOIN suppliers s ON s.id = sp.supplier_id
+       ORDER BY sp.purchase_date DESC, sp.id DESC
+       LIMIT ? OFFSET ?`,
+      [limit, offset]
+    );
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    res.json({ data: rows, total, page, limit });
+  })
+);
+
+app.post(
+  "/api/supplier-purchases",
+  requireAuth,
+  ownerOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { supplier_id, total, purchase_date, notes } = req.body;
+    const sid = Number(supplier_id);
+    const amt = Number(total);
+    if (!sid || !Number.isFinite(amt) || amt <= 0) return res.status(400).json({ error: "Supplier dan total nominal wajib (total > 0)" });
+    const pd =
+      purchase_date && /^\d{4}-\d{2}-\d{2}$/.test(String(purchase_date))
+        ? String(purchase_date).slice(0, 10)
+        : new Date().toISOString().slice(0, 10);
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      const [r] = await conn.query(
+        `INSERT INTO supplier_purchases (supplier_id, total, purchase_date, notes) VALUES (?,?,?,?)`,
+        [sid, amt, pd, notes || null]
+      );
+      await conn.query(`UPDATE suppliers SET total_purchase = total_purchase + ? WHERE id=?`, [amt, sid]);
+      await conn.commit();
+      res.status(201).json({ id: r.insertId });
+    } catch (e) {
+      await conn.rollback();
+      res.status(400).json({ error: e.message });
+    } finally {
+      conn.release();
+    }
+  })
+);
+
+app.get(
+  "/api/reports/sales",
+  requireAuth,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const from = req.query.from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
@@ -1789,7 +2264,7 @@ app.get(
 app.get(
   "/api/reports/best-sellers",
   requireAuth,
-  ownerOrAdmin,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const from = req.query.from;
@@ -1832,7 +2307,7 @@ app.get(
 app.get(
   "/api/reports/margin-by-product",
   requireAuth,
-  ownerOrAdmin,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const q = String(req.query.q || "").trim();
@@ -1872,7 +2347,7 @@ app.get(
 app.get(
   "/api/reports/stock-summary",
   requireAuth,
-  ownerOrAdmin,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const q = String(req.query.q || "").trim();
@@ -1906,7 +2381,7 @@ app.get(
 app.get(
   "/api/reports/profit-loss",
   requireAuth,
-  ownerOrAdmin,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const from =
       req.query.from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10);
@@ -1972,7 +2447,7 @@ app.get(
 app.get(
   "/api/reports/stock-prediction",
   requireAuth,
-  ownerOrAdmin,
+  reportsOrOwnerAdmin,
   asyncHandler(async (req, res) => {
     const { page, limit, offset } = listPagination(req);
     const q = String(req.query.q || "").trim();
@@ -2219,6 +2694,734 @@ app.post(
       [b.store_id || null, b.name, b.connection_type || "bluetooth", b.address, b.paper_width_mm || 58, b.is_default ? 1 : 0]
     );
     res.status(201).json({ id: r.insertId });
+  })
+);
+
+// ==================================// ==========================================
+// CATALOG & SOCIAL MEDIA FEATURE ENDPOINTS (WITH catalog PREFIX)
+// ==========================================
+
+const CATALOG_UPLOAD_DIR = path.join(__dirname, "uploads-catalog-sekargumilang");
+if (!fs.existsSync(CATALOG_UPLOAD_DIR)) fs.mkdirSync(CATALOG_UPLOAD_DIR, { recursive: true });
+
+app.use("/uploads-catalog-sekargumilang", express.static(CATALOG_UPLOAD_DIR));
+
+const catalogStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, CATALOG_UPLOAD_DIR),
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname) || ".jpg";
+    cb(null, `cat_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+  },
+});
+const catalogUpload = multer({
+  storage: catalogStorage,
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!/^image\/(jpeg|png|webp|gif)$/i.test(file.mimetype)) return cb(new Error("Hanya gambar"));
+    cb(null, true);
+  },
+});
+
+async function nextCatalogProductSortOrder(conn = pool) {
+  const [[row]] = await conn.query(`SELECT COALESCE(MAX(sort_order), 0) + 10 AS n FROM catalog_products`);
+  return Number(row?.n || 10);
+}
+
+async function nextCatalogImageSortOrder(productId, conn = pool) {
+  const [[row]] = await conn.query(
+    `SELECT COALESCE(MAX(sort_order), 0) + 10 AS n FROM catalog_product_images WHERE product_id=?`,
+    [productId]
+  );
+  return Number(row?.n || 10);
+}
+
+async function syncCatalogProductPrimaryImage(productId, conn = pool) {
+  const [[img]] = await conn.query(
+    `SELECT image_path FROM catalog_product_images WHERE product_id=? ORDER BY sort_order ASC, id ASC LIMIT 1`,
+    [productId]
+  );
+  await conn.query(`UPDATE catalog_products SET image_path=? WHERE id=?`, [img?.image_path || null, productId]);
+}
+
+async function applyCatalogSortOrder(table, ids, sortValues = null, conn = pool) {
+  const clean = [...new Set(ids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+  if (!clean.length) return;
+  const values =
+    Array.isArray(sortValues) && sortValues.length === clean.length
+      ? sortValues.map((n) => Number(n))
+      : clean.map((_id, i) => (i + 1) * 10);
+  for (let i = 0; i < clean.length; i++) {
+    await conn.query(`UPDATE ${table} SET sort_order=? WHERE id=?`, [values[i], clean[i]]);
+  }
+}
+
+// --- PUBLIC ENDPOINTS ---
+
+// 1. GET Public Categories Tree
+app.get(
+  "/api/catalog/categories",
+  asyncHandler(async (req, res) => {
+    const [cats] = await pool.query(
+      `SELECT id, name, code, slug FROM catalog_categories ORDER BY name`
+    );
+    for (const cat of cats) {
+      const [subs] = await pool.query(
+        `SELECT id, name, code, slug FROM catalog_subcategories WHERE category_id = ? ORDER BY name`,
+        [cat.id]
+      );
+      cat.subcategories = subs;
+    }
+    res.json({
+      success: true,
+      data: cats
+    });
+  })
+);
+
+// 2. GET Public Products
+app.get(
+  "/api/catalog/products",
+  asyncHandler(async (req, res) => {
+    const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || "12"), 10) || 12));
+    const offset = (page - 1) * limit;
+    const q = String(req.query.q || "").trim();
+    const catId = req.query.category_id ? Number(req.query.category_id) : null;
+    const subCatId = req.query.subcategory_id ? Number(req.query.subcategory_id) : null;
+    
+    let where = "WHERE p.is_active = 1";
+    const params = [];
+    
+    if (q) {
+      where += " AND (p.name LIKE ? OR p.description LIKE ?)";
+      const qq = `%${q}%`;
+      params.push(qq, qq);
+    }
+    
+    if (subCatId) {
+      where += " AND p.subcategory_id = ?";
+      params.push(subCatId);
+    } else if (catId) {
+      where += " AND p.category_id = ?";
+      params.push(catId);
+    }
+
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS p.id, p.sku, p.barcode, p.name, p.description, p.sell_price, p.crossed_price, p.stock, p.is_active, p.image_path, p.sort_order
+       FROM catalog_products p
+       ${where}
+       ORDER BY p.sort_order ASC, p.id DESC
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    
+    for (const row of rows) {
+      const [imgs] = await pool.query(
+        `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+        [row.id]
+      );
+      row.images = imgs;
+    }
+    
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      }
+    });
+  })
+);
+
+// 2b. GET Public Single Product (shareable detail)
+app.get(
+  "/api/catalog/products/:id",
+  asyncHandler(async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ success: false, error: "ID produk tidak valid" });
+    }
+
+    const [rows] = await pool.query(
+      `SELECT p.id, p.sku, p.barcode, p.name, p.description, p.sell_price, p.crossed_price, p.stock,
+              p.is_active, p.image_path, p.sort_order, p.category_id, p.subcategory_id,
+              c.name AS category_name, s.name AS subcategory_name
+       FROM catalog_products p
+       LEFT JOIN catalog_categories c ON c.id = p.category_id
+       LEFT JOIN catalog_subcategories s ON s.id = p.subcategory_id
+       WHERE p.id = ? AND p.is_active = 1`,
+      [id]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({ success: false, error: "Produk tidak ditemukan" });
+    }
+
+    const product = rows[0];
+    const [imgs] = await pool.query(
+      `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+      [id]
+    );
+    product.images = imgs;
+
+    res.json({ success: true, data: product });
+  })
+);
+
+// 3. GET Public Social Media
+app.get(
+  "/api/catalog/social-media",
+  asyncHandler(async (req, res) => {
+    const keys = ["catalog_ig", "catalog_tiktok", "catalog_fb", "catalog_youtube", "catalog_wa"];
+    const [rows] = await pool.query(
+      `SELECT \`key\`, value FROM settings WHERE \`key\` IN (?)`,
+      [keys]
+    );
+    
+    const result = {
+      ig: "",
+      tiktok: "",
+      fb: "",
+      youtube: "",
+      wa: [],
+    };
+    
+    for (const row of rows) {
+      if (row.key === "catalog_ig") result.ig = row.value;
+      else if (row.key === "catalog_tiktok") result.tiktok = row.value;
+      else if (row.key === "catalog_fb") result.fb = row.value;
+      else if (row.key === "catalog_youtube") result.youtube = row.value;
+      else if (row.key === "catalog_wa") {
+        try {
+          result.wa = JSON.parse(row.value);
+        } catch {
+          result.wa = [];
+        }
+      }
+    }
+    
+    res.json({
+      success: true,
+      data: result
+    });
+  })
+);
+
+// --- ADMIN CATEGORIES ENDPOINTS ---
+
+// 4. GET Admin Categories
+app.get(
+  "/api/catalog/admin/categories",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, offset } = catalogListPagination(req);
+    const q = String(req.query.q || "").trim();
+    let where = "WHERE 1=1";
+    const params = [];
+    if (q) {
+      where += " AND (name LIKE ? OR slug LIKE ? OR code LIKE ?)";
+      const qq = `%${q}%`;
+      params.push(qq, qq, qq);
+    }
+    
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS * FROM catalog_categories ${where} ORDER BY name LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  })
+);
+
+// 5. POST Admin Categories
+app.post(
+  "/api/catalog/admin/categories",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nama wajib" });
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    const [r] = await pool.query(`INSERT INTO catalog_categories (name, code, slug) VALUES (?, ?, ?)`, [
+      name,
+      code,
+      name.toLowerCase().replace(/\s+/g, "-"),
+    ]);
+    res.status(201).json({ success: true, id: r.insertId });
+  })
+);
+
+// 6. PUT Admin Categories
+app.put(
+  "/api/catalog/admin/categories/:id",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    if (!name) return res.status(400).json({ error: "Nama wajib" });
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    
+    await pool.query(
+      `UPDATE catalog_categories SET name=?, code=?, slug=? WHERE id=?`,
+      [
+        name,
+        code,
+        name.toLowerCase().replace(/\s+/g, "-"),
+        req.params.id
+      ]
+    );
+    res.json({ success: true });
+  })
+);
+
+// 7. DELETE Admin Categories
+app.delete(
+  "/api/catalog/admin/categories/:id",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    await pool.query(`DELETE FROM catalog_categories WHERE id=?`, [req.params.id]);
+    res.json({ success: true });
+  })
+);
+
+// --- ADMIN SUBCATEGORIES ENDPOINTS ---
+
+// 8. GET Admin Subcategories
+app.get(
+  "/api/catalog/admin/subcategories",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const { page, limit, offset } = catalogListPagination(req);
+    const q = String(req.query.q || "").trim();
+    const catId = req.query.category_id ? Number(req.query.category_id) : null;
+    
+    let where = "WHERE 1=1";
+    const params = [];
+    if (q) {
+      where += " AND (s.name LIKE ? OR s.code LIKE ? OR s.slug LIKE ?)";
+      const qq = `%${q}%`;
+      params.push(qq, qq, qq);
+    }
+    if (catId) {
+      where += " AND s.category_id = ?";
+      params.push(catId);
+    }
+    
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS s.*, c.name AS category_name
+       FROM catalog_subcategories s
+       JOIN catalog_categories c ON c.id = s.category_id
+       ${where}
+       ORDER BY s.name
+       LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  })
+);
+
+// 9. POST Admin Subcategories
+app.post(
+  "/api/catalog/admin/subcategories",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    const category_id = Number(req.body.category_id);
+    if (!name) return res.status(400).json({ error: "Nama wajib" });
+    if (!category_id) return res.status(400).json({ error: "Kategori induk wajib" });
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    
+    const [r] = await pool.query(
+      `INSERT INTO catalog_subcategories (category_id, name, code, slug) VALUES (?, ?, ?, ?)`,
+      [
+        category_id,
+        name,
+        code,
+        name.toLowerCase().replace(/\s+/g, "-")
+      ]
+    );
+    res.status(201).json({ success: true, id: r.insertId });
+  })
+);
+
+// 10. PUT Admin Subcategories
+app.put(
+  "/api/catalog/admin/subcategories/:id",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const name = String(req.body.name || "").trim();
+    const category_id = Number(req.body.category_id);
+    if (!name) return res.status(400).json({ error: "Nama wajib" });
+    if (!category_id) return res.status(400).json({ error: "Kategori induk wajib" });
+    const code = req.body.code != null ? String(req.body.code).trim() || null : null;
+    
+    await pool.query(
+      `UPDATE catalog_subcategories SET category_id=?, name=?, code=?, slug=? WHERE id=?`,
+      [
+        category_id,
+        name,
+        code,
+        name.toLowerCase().replace(/\s+/g, "-"),
+        req.params.id
+      ]
+    );
+    res.json({ success: true });
+  })
+);
+
+// 11. DELETE Admin Subcategories
+app.delete(
+  "/api/catalog/admin/subcategories/:id",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    await pool.query(`DELETE FROM catalog_subcategories WHERE id=?`, [req.params.id]);
+    res.json({ success: true });
+  })
+);
+
+// --- ADMIN PRODUCTS ENDPOINTS ---
+
+// 12. GET Admin Products
+app.get(
+  "/api/catalog/admin/products",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const q = String(req.query.q || "").trim();
+    const { page, limit, offset } = catalogListPagination(req);
+    let where = "WHERE 1=1";
+    const params = [];
+    if (q) {
+      where += " AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)";
+      const qq = `%${q}%`;
+      params.push(qq, qq, qq);
+    }
+    if (req.query.active !== undefined) {
+      where += " AND p.is_active = ?";
+      params.push(Number(req.query.active));
+    }
+    
+    const [rows] = await pool.query(
+      `SELECT SQL_CALC_FOUND_ROWS p.*, c.name AS category_name, s.name AS subcategory_name
+       FROM catalog_products p
+       LEFT JOIN catalog_categories c ON c.id = p.category_id
+       LEFT JOIN catalog_subcategories s ON s.id = p.subcategory_id
+       ${where}
+       ORDER BY p.sort_order ASC, p.id DESC LIMIT ? OFFSET ?`,
+      [...params, limit, offset]
+    );
+    const [[{ total }]] = await pool.query(`SELECT FOUND_ROWS() AS total`);
+    
+    for (const row of rows) {
+      const [imgs] = await pool.query(
+        `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id = ? ORDER BY sort_order ASC, id ASC`,
+        [row.id]
+      );
+      row.images = imgs;
+      row.categories = [row.category_name, row.subcategory_name].filter(Boolean).join(" > ");
+    }
+    
+    res.json({
+      success: true,
+      data: rows,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  })
+);
+
+// 13. GET Admin Products by ID
+app.get(
+  "/api/catalog/admin/products/:id",
+  requireAuth,
+  kasirOrAdmin,
+  asyncHandler(async (req, res) => {
+    const [rows] = await pool.query(`SELECT * FROM catalog_products WHERE id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Not found" });
+    const [imgs] = await pool.query(
+      `SELECT id, image_path, sort_order FROM catalog_product_images WHERE product_id=? ORDER BY sort_order ASC, id ASC`,
+      [req.params.id]
+    );
+    res.json({
+      success: true,
+      data: {
+        ...rows[0],
+        images: imgs
+      }
+    });
+  })
+);
+
+// 13b. PUT Admin Products reorder (drag & drop)
+app.put(
+  "/api/catalog/admin/products/reorder",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ error: "Daftar urutan produk wajib" });
+    const sortValues = Array.isArray(req.body?.sort_values) ? req.body.sort_values.map(Number) : null;
+    await applyCatalogSortOrder("catalog_products", ids, sortValues);
+    res.json({ success: true });
+  })
+);
+
+// 14. POST Admin Products
+app.post(
+  "/api/catalog/admin/products",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const sku = String(b.sku || "").trim() || `SKU-${Date.now()}`;
+    let barcode = b.barcode ? String(b.barcode).trim() : null;
+    if (!barcode) barcode = `899${String(Date.now()).slice(-9)}`;
+    const category_id = Number(b.category_id);
+    const subcategory_id = b.subcategory_id ? Number(b.subcategory_id) : null;
+    
+    if (!category_id) return res.status(400).json({ error: "Kategori wajib dipilih" });
+
+    const sortOrder =
+      b.sort_order != null && b.sort_order !== "" && Number.isFinite(Number(b.sort_order))
+        ? Math.max(0, Math.trunc(Number(b.sort_order)))
+        : await nextCatalogProductSortOrder();
+
+    const [r] = await pool.query(
+      `INSERT INTO catalog_products (category_id, subcategory_id, sku, barcode, name, description, sell_price, crossed_price, stock, is_active, sort_order)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        category_id,
+        subcategory_id,
+        sku,
+        barcode,
+        b.name,
+        b.description || null,
+        Number(b.sell_price || 0),
+        b.crossed_price != null && b.crossed_price !== "" ? Number(b.crossed_price) : null,
+        Number(b.stock || 0),
+        b.is_active === false ? 0 : 1,
+        sortOrder,
+      ]
+    );
+    res.status(201).json({ success: true, id: r.insertId, barcode });
+  })
+);
+
+// 15. PUT Admin Products
+app.put(
+  "/api/catalog/admin/products/:id",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const b = req.body;
+    const category_id = Number(b.category_id);
+    const subcategory_id = b.subcategory_id ? Number(b.subcategory_id) : null;
+    
+    if (!category_id) return res.status(400).json({ error: "Kategori wajib dipilih" });
+
+    const sortOrder =
+      b.sort_order != null && b.sort_order !== "" && Number.isFinite(Number(b.sort_order))
+        ? Math.max(0, Math.trunc(Number(b.sort_order)))
+        : null;
+
+    const fields = [
+      "category_id=?",
+      "subcategory_id=?",
+      "sku=?",
+      "barcode=?",
+      "name=?",
+      "description=?",
+      "sell_price=?",
+      "crossed_price=?",
+      "stock=?",
+      "is_active=?",
+    ];
+    const vals = [
+      category_id,
+      subcategory_id,
+      b.sku,
+      b.barcode,
+      b.name,
+      b.description || null,
+      Number(b.sell_price),
+      b.crossed_price != null && b.crossed_price !== "" ? Number(b.crossed_price) : null,
+      Number(b.stock || 0),
+      b.is_active ? 1 : 0,
+    ];
+    if (sortOrder !== null) {
+      fields.push("sort_order=?");
+      vals.push(sortOrder);
+    }
+    vals.push(req.params.id);
+
+    await pool.query(`UPDATE catalog_products SET ${fields.join(", ")} WHERE id=?`, vals);
+    res.json({ success: true });
+  })
+);
+
+// 16. DELETE Admin Products
+app.delete(
+  "/api/catalog/admin/products/:id",
+  requireAuth,
+  requireRoles("admin"),
+  asyncHandler(async (req, res) => {
+    const [rows] = await pool.query(`SELECT image_path FROM catalog_products WHERE id=?`, [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: "Produk tidak ada" });
+    
+    const [imgs] = await pool.query(`SELECT image_path FROM catalog_product_images WHERE product_id=?`, [req.params.id]);
+    
+    await pool.query(`DELETE FROM catalog_products WHERE id=?`, [req.params.id]);
+    
+    // Delete multiple catalog images from disk
+    for (const img of imgs) {
+      const absPath = path.join(__dirname, img.image_path);
+      fs.unlink(absPath, () => {});
+    }
+    
+    unlinkProductImageFile(rows[0].image_path);
+    res.json({ success: true });
+  })
+);
+
+// 17. POST Admin Product Multiple Images Upload
+app.post(
+  "/api/catalog/admin/products/:id/images",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  catalogUpload.array("images", 10),
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const files = req.files || [];
+    if (!files.length) return res.status(400).json({ error: "File gambar wajib" });
+    
+    const inserted = [];
+    for (const file of files) {
+      const rel = `/uploads-catalog-sekargumilang/${file.filename}`;
+      const sortOrder = await nextCatalogImageSortOrder(productId);
+      const [r] = await pool.query(
+        `INSERT INTO catalog_product_images (product_id, image_path, sort_order) VALUES (?, ?, ?)`,
+        [productId, rel, sortOrder]
+      );
+      inserted.push({ id: r.insertId, image_path: rel, sort_order: sortOrder });
+    }
+
+    await syncCatalogProductPrimaryImage(productId);
+
+    res.json({ success: true, images: inserted });
+  })
+);
+
+// 17b. PUT Admin Product Images reorder (drag & drop)
+app.put(
+  "/api/catalog/admin/products/:id/images/reorder",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ error: "Daftar urutan gambar wajib" });
+    const sortValues = Array.isArray(req.body?.sort_values) ? req.body.sort_values.map(Number) : null;
+
+    const placeholders = ids.map(() => "?").join(",");
+    const [owned] = await pool.query(
+      `SELECT id FROM catalog_product_images WHERE product_id=? AND id IN (${placeholders})`,
+      [productId, ...ids.map(Number)]
+    );
+    if (owned.length !== ids.length) {
+      return res.status(400).json({ error: "Urutan gambar tidak valid untuk produk ini" });
+    }
+
+    await applyCatalogSortOrder("catalog_product_images", ids, sortValues);
+    await syncCatalogProductPrimaryImage(productId);
+    res.json({ success: true });
+  })
+);
+
+// 18. DELETE Admin Product Image
+app.delete(
+  "/api/catalog/admin/products/:id/images/:imageId",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const productId = Number(req.params.id);
+    const imageId = Number(req.params.imageId);
+    
+    const [[img]] = await pool.query(
+      `SELECT image_path FROM catalog_product_images WHERE id=? AND product_id=?`,
+      [imageId, productId]
+    );
+    if (!img) return res.status(404).json({ error: "Gambar tidak ditemukan" });
+
+    await pool.query(`DELETE FROM catalog_product_images WHERE id=?`, [imageId]);
+
+    const absPath = path.join(__dirname, img.image_path);
+    fs.unlink(absPath, () => {});
+
+    await syncCatalogProductPrimaryImage(productId);
+
+    res.json({ success: true });
+  })
+);
+
+// 19. PUT Admin Social Media and Contact
+app.put(
+  "/api/catalog/admin/social-media",
+  requireAuth,
+  requireRoles("admin", "owner"),
+  asyncHandler(async (req, res) => {
+    const { ig, tiktok, fb, youtube, wa } = req.body;
+    
+    const updates = [
+      { key: "catalog_ig", value: String(ig || "").trim() },
+      { key: "catalog_tiktok", value: String(tiktok || "").trim() },
+      { key: "catalog_fb", value: String(fb || "").trim() },
+      { key: "catalog_youtube", value: String(youtube || "").trim() },
+      { key: "catalog_wa", value: JSON.stringify(Array.isArray(wa) ? wa : []) },
+    ];
+    
+    for (const item of updates) {
+      await pool.query(
+        `INSERT INTO settings (\`key\`, value) VALUES (?, ?) 
+         ON DUPLICATE KEY UPDATE value = ?`,
+        [item.key, item.value, item.value]
+      );
+    }
+    
+    res.json({ success: true });
   })
 );
 
